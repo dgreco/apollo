@@ -4,9 +4,10 @@
 # docker compose) → native (manual; needs the LLVM/OpenSSL toolchain).
 #
 # Notes
-#  * sbt 2.0.8 is pinned in project/build.properties; the sbt launcher in the
-#    image below bootstraps it. If your runner can't pull this tag, swap it for
-#    any recent `sbtscala/scala-sbt` (temurin 21) tag.
+#  * The image is on the sbtscala sbt-2.x line (temurin JDK 21); its launcher
+#    runs the sbt 2.0.8 pinned in project/build.properties. `_2.x` is a rolling
+#    tag — swap the JDK/sbt coordinates for any published `sbtscala/scala-sbt`
+#    tag if this one is ever unavailable (see hub.docker.com/r/sbtscala/scala-sbt).
 #  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test job
 #    uses `testOnly *` to force a full run.
 #  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); run it on a
@@ -37,7 +38,7 @@ workflow:
 # --- JVM jobs -----------------------------------------------------------------
 
 .sbt:
-  image: sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.7_6_1.11.3_3.7.1
+  image: sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x
   cache:
     # GitLab allows at most 2 files in cache:key:files. build.sbt (library deps)
     # and plugins.sbt (sbt plugins) are what meaningfully invalidate the caches.
