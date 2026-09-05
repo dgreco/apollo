@@ -4,9 +4,11 @@ Snapshot of the effort to bring apollo's interactive REPL slash commands toward
 parity with the NousResearch Hermes agent (`hermes_cli/commands.py`). Written so
 the work can be resumed later without re-deriving the context.
 
-**As of:** 2026-09-05 · **Branch:** `main` · **Last commit:** `2df6107`
-**Verified:** JVM full suite (218 tests) + Scala Native suites green; CI pipelines
-**168–177** all green (compile / test:jvm / integration:compose).
+**As of:** 2026-09-05 · **Branch:** `main` · **Last commit:** `d67f7d0`
+**Verified:** JVM full suite (219 tests) + Scala Native suites green; CI pipelines
+**168–178** all green (compile / test:jvm / integration:compose). Opt-in
+`display.async_input` mode is unit-tested but its interactive terminal behavior
+is pending hands-on TTY validation.
 
 apollo's REPL went from **12 commands (2 of them dead stubs)** to **~50 real,
 tested commands**. Genuine remaining parity is now blocked by missing
@@ -41,7 +43,7 @@ tested commands**. Genuine remaining parity is now blocked by missing
 ### Blocked by architecture
 | Command(s) | Missing foundation |
 |---|---|
-| `/steer` (mid-turn), live `/queue`-while-running | The **Agent-side steer mechanism is built and tested** (`agent.steer` → injected after the next tool round; `AgentSteerSuite`), and `/steer` at the prompt queues for the next turn. What's still missing is the **concurrent-input TUI**: a reader active *during* a streaming turn (bottom input line + redraw), so you can type `/steer` while the turn runs. apollo's REPL is a single blocking `readLine` loop with no input during a turn. Non-verifiable headlessly (needs a real TTY). |
+| `/steer` (mid-turn), live `/queue`-while-running | **Built (opt-in), pending TTY validation.** Set `display.async_input: true` — turns run on a background fiber, a single persistent `readLine` stays live, and output streams above via `LineEditor.printAbove` (JLine). You can then type `/steer`, `/stop`, `/queue`, or plain follow-ups *during* a turn. Logic + line-buffering are unit-tested; the interactive terminal behavior is JVM/JLine-only and **not** headlessly verifiable — validate on a real terminal. Native has no concurrent-input TUI (printAbove = plain println). |
 | `/handoff` | **REPL↔gateway IPC** — the REPL can't hand a live session to a separate `apollo gateway` process. |
 | `/kanban`, `/plugins`, `/curator`, `/blueprint`, `/journey`, `/suggestions` | Whole subsystems apollo lacks: board model, plugin loader, skill-graph, suggestion engine. |
 
@@ -76,14 +78,13 @@ Each is a real project, not a command — scope and build with tests where the
 architecture allows, and expect the concurrent-input work to need hands-on TTY
 validation.
 
-1. **Concurrent-input TUI layer** — the remaining piece for *mid-turn* `/steer`
-   and live `/queue`. Needs: (a) a `printAbove`-style method on `LineEditor`
-   (JLine has `LineReader.printAbove`; the native editor needs manual cursor
-   save / clear-line / reprint); (b) routing the turn's streaming callbacks
-   through it; (c) running the input reader on a fiber concurrently with the
-   turn (steer already flows through the thread-safe `agent.steer`). The Agent
-   half is done + tested; this layer's interactive terminal behavior is NOT
-   headlessly verifiable — needs hands-on TTY validation on both platforms.
+1. ~~Concurrent-input TUI layer~~ — **built (opt-in), JVM/JLine.**
+   `display.async_input: true` runs turns on a fiber with a persistent
+   `readLine` and `LineEditor.printAbove` output; enables mid-turn `/steer`,
+   `/stop`, `/queue`. **Still needs hands-on TTY validation** (not headlessly
+   testable) and a **Native** concurrent-input implementation (currently
+   `printAbove` = plain println on Native, so async_input is JVM-only). Code:
+   `Repl.asyncLoop`/`runAsyncTurn`/`asyncCallbacks`; `LineEditor.printAbove`.
 2. ~~Agent mock-transport seam~~ — **done** (the localhost-mock harness serves
    this; `AgentSteerSuite` uses it). Agent-side steer is built and tested.
 3. **REPL↔gateway IPC** — a control channel (socket/file) so `/handoff` can pass
