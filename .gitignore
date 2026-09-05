@@ -1,0 +1,18 @@
+# sbt / Scala build output
+target/
+project/target/
+project/project/
+.bloop/
+.bsp/
+.metals/
+
+# IDEs
+.idea/
+*.iml
+
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# logs
+*.log
