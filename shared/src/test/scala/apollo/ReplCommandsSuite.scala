@@ -121,6 +121,16 @@ class ReplCommandsSuite extends munit.FunSuite:
     assert(out.contains("b3") && out.contains("failed: nope"), out)
   }
 
+  test("parseInterval accepts s/m/h and bare seconds") {
+    assertEquals(ReplCommands.parseInterval("30s"), Some(30))
+    assertEquals(ReplCommands.parseInterval("5m"), Some(300))
+    assertEquals(ReplCommands.parseInterval("2h"), Some(7200))
+    assertEquals(ReplCommands.parseInterval("45"), Some(45))
+    assertEquals(ReplCommands.parseInterval("0"), None)
+    assertEquals(ReplCommands.parseInterval("x"), None)
+    assertEquals(ReplCommands.parseInterval(""), None)
+  }
+
   test("parseCheckpoints + formatCheckpoints number newest-first") {
     assertEquals(ReplCommands.parseCheckpoints(""), Nil)
     val out = "refs/apollo/ckpt/200|2026-09-05 10:00:00 +0000\nrefs/apollo/ckpt/100|2026-09-05 09:00:00 +0000\n"

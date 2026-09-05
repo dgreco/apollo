@@ -130,6 +130,16 @@ object ReplCommands:
     go(arg.split("\\s+").toList.filter(_.nonEmpty))
     (rest.mkString(" "), math.max(1, times), math.max(0, every))
 
+  /** Parse a `/heartbeat` interval ("30s", "5m", "2h", or bare seconds) → seconds. */
+  def parseInterval(s: String): Option[Int] =
+    val t = s.trim.toLowerCase
+    val (numStr, mult) =
+      if t.endsWith("s") then (t.dropRight(1), 1)
+      else if t.endsWith("m") then (t.dropRight(1), 60)
+      else if t.endsWith("h") then (t.dropRight(1), 3600)
+      else (t, 1)
+    numStr.toIntOption.filter(_ > 0).map(_ * mult)
+
   /** Parse `git for-each-ref ... %(refname)|%(creatordate:iso)` into (ref, date). */
   def parseCheckpoints(out: String): List[(String, String)] =
     out.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>

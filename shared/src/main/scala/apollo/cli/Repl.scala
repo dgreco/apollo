@@ -41,6 +41,7 @@ final class Repl(
   private var pendingImages = List.empty[Content.Image] // attached via /image, sent with the next turn
   private var goal: Maybe[String] = Absent              // /goal — standing objective injected each turn
   private var queued        = List.empty[String]        // /queue — prompts to run after the next turn
+  private var heartbeat: Maybe[Repl.Heartbeat] = Absent // /heartbeat — recurring prompt fired while idle
 
   def banner: String =
     val skillsLine = s"session ${Style.dim(sess)}"
@@ -54,10 +55,27 @@ final class Repl(
   def runSeeded(query: String): Unit < (Sync & Async) =
     runTurn(query).andThen(loop)
 
+  private def promptStr: String = Style.gold("☀ ") + ""
+
+  /** Wait for the next input line, OR — when a heartbeat is active — the timer,
+    * whichever comes first. The spike confirmed Async.race returns the timer
+    * branch promptly even while readLine is still blocked. */
+  private def nextTick: Repl.Tick < (Sync & Async) =
+    heartbeat match
+      case Present(hb) if hb.active =>
+        Async.race(Seq(
+          editor.readLine(promptStr).map(Repl.Tick.Typed(_)),
+          Async.sleep(hb.interval.seconds).andThen(Repl.Tick.Fired(hb.prompt))
+        ))
+      case _ =>
+        editor.readLine(promptStr).map(Repl.Tick.Typed(_))
+
   private def loop: Unit < (Sync & Async) =
-    editor.readLine(Style.gold("☀ ") + "").map {
-      case Absent => Console.printLine(Style.dim("bye"))
-      case Present(line) =>
+    nextTick.map {
+      case Repl.Tick.Fired(p) =>
+        Console.printLine(Style.dim("· heartbeat")).andThen(runTurn(p)).andThen(drainQueue).andThen(loop)
+      case Repl.Tick.Typed(Absent) => Console.printLine(Style.dim("bye"))
+      case Repl.Tick.Typed(Present(line)) =>
         val trimmed = line.trim
         if trimmed.isEmpty then loop
         else if trimmed.startsWith("/") then
@@ -260,6 +278,7 @@ final class Repl(
       case "queue" => doQueue(arg)
       case "moa" =>
         if arg.isEmpty then Console.printLine("usage: /moa <prompt>").andThen(true) else doMoa(arg, 3)
+      case "heartbeat" | "hb" => doHeartbeat(arg)
       case "learn" =>
         if arg.isEmpty then Console.printLine("usage: /learn <what to capture as a skill>").andThen(true)
         else runTurn(
@@ -448,6 +467,33 @@ final class Repl(
         queued = queued :+ arg
         Console.printLine(Style.dim(s"queued (${queued.length} pending) — runs after your next message")).andThen(true)
 
+  // --- /heartbeat: recurring prompt fired while the REPL is idle -------------
+
+  private def doHeartbeat(arg: String): Boolean < (Sync & Async) =
+    arg.split("\\s+", 3).toList.map(_.trim).filter(_.nonEmpty) match
+      case Nil | ("status" :: _) =>
+        Console.printLine(heartbeat match
+          case Present(hb) => s"heartbeat: every ${hb.interval}s ${if hb.active then "active" else "paused"} — ${hb.prompt}"
+          case Absent      => "no heartbeat set (use: /heartbeat every <interval> <prompt>)").andThen(true)
+      case ("clear" | "off") :: _ =>
+        heartbeat = Absent
+        Console.printLine("heartbeat cleared").andThen(true)
+      case "pause" :: _ =>
+        heartbeat = heartbeat.map(_.copy(active = false))
+        Console.printLine("heartbeat paused").andThen(true)
+      case "resume" :: _ =>
+        heartbeat = heartbeat.map(_.copy(active = true))
+        Console.printLine("heartbeat resumed").andThen(true)
+      case "every" :: interval :: prompt :: Nil =>
+        ReplCommands.parseInterval(interval) match
+          case Some(sec) =>
+            heartbeat = Present(Repl.Heartbeat(sec, prompt, active = true))
+            Console.printLine(s"heartbeat set: every ${sec}s — $prompt (fires while idle; /heartbeat clear to stop)").andThen(true)
+          case None =>
+            Console.printLine(s"bad interval: $interval (e.g. 30s, 5m, 2h)").andThen(true)
+      case _ =>
+        Console.printLine("usage: /heartbeat [every <interval> <prompt> | status | pause | resume | clear]").andThen(true)
+
   // --- /moa: mixture of agents — N answers in parallel, then synthesize ------
 
   private def childAnswer(prompt: String, i: Int): String < (Sync & Async) =
@@ -596,6 +642,7 @@ final class Repl(
       |  /queue [prompt|clear]    stack prompts to run after the next turn
       |  /moa <prompt>            mixture-of-agents: 3 answers in parallel, then synthesize
       |  /learn <what>            capture something as a reusable skill
+      |  /heartbeat | /hb [every <interval> <prompt>|status|pause|resume|clear]   recurring idle prompt
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
@@ -689,3 +736,12 @@ final class Repl(
         runtime = runtime.copy(model = modelPart)
         Console.printLine(s"switched model to $modelPart")
 end Repl
+
+object Repl:
+  /** A recurring `/heartbeat` prompt fired while the REPL sits idle. */
+  final case class Heartbeat(interval: Int, prompt: String, active: Boolean)
+
+  /** What the idle wait produced: a typed line (Absent = EOF) or a heartbeat tick. */
+  enum Tick:
+    case Typed(line: Maybe[String])
+    case Fired(prompt: String)
