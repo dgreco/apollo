@@ -1,0 +1,17 @@
+# Sandbox stack.
+#
+# Two uses:
+#   1. The GitLab CI `integration` job brings this up under Docker-in-Docker to
+#      prove `docker compose` works on the runner (and as a place to hang real
+#      compose-based integration tests later).
+#   2. Locally, `sandbox` is a ready target for apollo's docker terminal backend:
+#         docker compose up -d
+#         # config.yaml:  terminal: { backend: docker, docker: { container: apollo-sandbox } }
+#
+# Keep it lightweight — it is a scratch container, not an application service.
+services:
+  sandbox:
+    image: alpine:3.20
+    container_name: apollo-sandbox
+    command: ["sleep", "infinity"]
+    init: true

@@ -1,0 +1,107 @@
+# GitLab CI for apollo — assumes a Docker executor.
+#
+# Pipeline: compile (JVM) → test (JVM) → integration (Docker-in-Docker +
+# docker compose) → native (manual; needs the LLVM/OpenSSL toolchain).
+#
+# Notes
+#  * sbt 2.0.8 is pinned in project/build.properties; the sbt launcher in the
+#    image below bootstraps it. If your runner can't pull this tag, swap it for
+#    any recent `sbtscala/scala-sbt` (temurin 21) tag.
+#  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test job
+#    uses `testOnly *` to force a full run.
+#  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); run it on a
+#    runner with enough RAM — hence it's `when: manual`.
+
+stages:
+  - build
+  - test
+  - integration
+  - native
+
+variables:
+  # Keep sbt/coursier caches inside the project dir so GitLab can cache them.
+  COURSIER_CACHE: "$CI_PROJECT_DIR/.cache/coursier"
+  SBT_OPTS: >-
+    -Dsbt.boot.directory=$CI_PROJECT_DIR/.sbt/boot
+    -Dsbt.global.base=$CI_PROJECT_DIR/.sbt/global
+    -Dsbt.ivy.home=$CI_PROJECT_DIR/.ivy2
+    -Dsbt.color=true
+
+# Run once per branch/MR/tag, and don't double-run a branch that has an open MR.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null'
+    - if: '$CI_COMMIT_TAG'
+
+# --- JVM jobs -----------------------------------------------------------------
+
+.sbt:
+  image: sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.7_6_1.11.3_3.7.1
+  cache:
+    key:
+      files:
+        - build.sbt
+        - project/build.properties
+        - project/plugins.sbt
+    paths:
+      - .cache/coursier/
+      - .ivy2/
+      - .sbt/
+
+compile:
+  extends: .sbt
+  stage: build
+  script:
+    - sbt agentJVM/compile
+
+test:jvm:
+  extends: .sbt
+  stage: test
+  needs: ["compile"]
+  script:
+    # Bare `test` == testQuick; `testOnly *` forces the whole suite to run.
+    - sbt "agentJVM/testOnly *"
+
+# --- integration: docker compose under Docker-in-Docker -----------------------
+
+integration:compose:
+  stage: integration
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_CERT_PATH: "/certs/client"
+    DOCKER_TLS_VERIFY: "1"
+  before_script:
+    - docker info
+    - docker compose version   # fails fast if the compose plugin is missing
+  script:
+    - docker compose up -d
+    - docker compose ps
+    # Prove the stack is reachable — the shape a docker-backed integration
+    # test (e.g. apollo's `terminal.backend: docker`) would build on.
+    - docker compose exec -T sandbox sh -c 'echo "hello from docker compose under dind"'
+  after_script:
+    - docker compose down -v || true
+
+# --- native binary (manual; heavy toolchain) ----------------------------------
+
+native:link:
+  extends: .sbt
+  stage: native
+  when: manual
+  allow_failure: true
+  before_script:
+    # Scala Native + kyo-http's OpenSSL TLS shim need a C/LLVM toolchain and
+    # OpenSSL 3 dev headers.
+    - apt-get update -qq
+    - apt-get install -y -qq clang llvm libstdc++-11-dev zlib1g-dev libssl-dev
+  script:
+    - sbt agentNative/nativeLink
+  artifacts:
+    paths:
+      - target/out/native0.5/scala-3.9.0/apollo/apollo
+    expire_in: 1 week
