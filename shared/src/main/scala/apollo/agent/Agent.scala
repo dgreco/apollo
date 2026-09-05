@@ -70,6 +70,11 @@ final class Agent(
   def apiCallCount: Int          = apiCalls
   def lastPromptTokenCount: Long = lastPromptTokens
 
+  /** Thread-safe steer buffer (`/steer`): messages pushed here are injected as
+    * user turns after the next tool round, without interrupting the run. */
+  private val steerBox = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+  def steer(message: String): Unit = { steerBox.add(message); () }
+
   private def nudgeSettings(toolNames: List[String]): Nudges.Settings =
     Nudges.Settings(
       memoryInterval = config.memoryNudgeInterval,
@@ -156,7 +161,7 @@ final class Agent(
                   runToolRound(toolUses, callbacks).map { results =>
                     val resultMsg = Message.toolResults(results)
                     messages = messages :+ resultMsg
-                    store.appendMessage(sid, resultMsg).andThen {
+                    store.appendMessage(sid, resultMsg).andThen(drainSteer(callbacks)).andThen {
                       loop(systemPrompt, toolNames, callbacks, iterationsThisTurn + 1, graceUsed || grace)
                     }
                   }
@@ -293,6 +298,21 @@ final class Agent(
     * model call — protecting the head, the recent tail, and the last real
     * user message.
     */
+  /** Drain the steer buffer, injecting any queued messages as a single user
+    * turn so the model sees them before the next iteration. */
+  private def drainSteer(callbacks: TurnCallbacks): Unit < (Sync & Async) =
+    val msgs = scala.collection.mutable.ListBuffer[String]()
+    var m = steerBox.poll()
+    while m != null do
+      msgs += m
+      m = steerBox.poll()
+    if msgs.isEmpty then Sync.defer(())
+    else
+      val steerMsg = Message.user(msgs.mkString("\n"))
+      messages = messages :+ steerMsg
+      callbacks.onStatus(s"steering: ${msgs.mkString("; ").take(120)}")
+        .andThen(store.appendMessage(sid, steerMsg))
+
   private def maybeCompress(callbacks: TurnCallbacks): Unit < (Sync & Async) =
     val forced        = forceCompress
     forceCompress     = false // consumed once, whether or not we act on it

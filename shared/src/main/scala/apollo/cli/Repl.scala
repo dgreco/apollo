@@ -279,6 +279,11 @@ final class Repl(
       case "moa" =>
         if arg.isEmpty then Console.printLine("usage: /moa <prompt>").andThen(true) else doMoa(arg, 3)
       case "heartbeat" | "hb" => doHeartbeat(arg)
+      case "steer" =>
+        if arg.isEmpty then Console.printLine("usage: /steer <message>").andThen(true)
+        else
+          agent.steer(arg)
+          Console.printLine(Style.dim("steer queued — injected after the next tool call")).andThen(true)
       case "learn" =>
         if arg.isEmpty then Console.printLine("usage: /learn <what to capture as a skill>").andThen(true)
         else runTurn(
@@ -643,6 +648,7 @@ final class Repl(
       |  /moa <prompt>            mixture-of-agents: 3 answers in parallel, then synthesize
       |  /learn <what>            capture something as a reusable skill
       |  /heartbeat | /hb [every <interval> <prompt>|status|pause|resume|clear]   recurring idle prompt
+      |  /steer <message>         inject guidance after the next tool call
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
