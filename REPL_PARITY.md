@@ -4,9 +4,9 @@ Snapshot of the effort to bring apollo's interactive REPL slash commands toward
 parity with the NousResearch Hermes agent (`hermes_cli/commands.py`). Written so
 the work can be resumed later without re-deriving the context.
 
-**As of:** 2026-09-05 · **Branch:** `main` · **Last commit:** `e763404`
-**Verified:** JVM full suite (217 tests) + Scala Native suites green; CI pipelines
-**168–176** all green (compile / test:jvm / integration:compose).
+**As of:** 2026-09-05 · **Branch:** `main` · **Last commit:** `2df6107`
+**Verified:** JVM full suite (218 tests) + Scala Native suites green; CI pipelines
+**168–177** all green (compile / test:jvm / integration:compose).
 
 apollo's REPL went from **12 commands (2 of them dead stubs)** to **~50 real,
 tested commands**. Genuine remaining parity is now blocked by missing
@@ -21,7 +21,7 @@ tested commands**. Genuine remaining parity is now blocked by missing
 | Meta | `/help`, `/version`·`/v`, `/whoami` |
 | Model | `/model`, `/reasoning`, `/reasoning-display`, `/verbose` |
 | Session | `/status`·`/history` (real token/context %), `/usage`, `/config`, `/profile`, `/reset`·`/new`, `/clear`, `/redraw`, `/title`, `/compress`·`/compact`, `/save`, `/prompt`·`/compose`, `/retry`, `/copy`, `/image`, `/sessions`, `/resume`, `/branch`·`/fork` |
-| Work | `/plan`, `/init`, `/diff`, `/loop`, `/bg`, `/agents`·`/tasks`, `/stop`, `/review`, `/goal`, `/queue`, `/moa`, `/learn`, `/heartbeat`·`/hb`, `/worktree`, `/snapshot`, `/rollback` |
+| Work | `/plan`, `/init`, `/diff`, `/loop`, `/bg`, `/agents`·`/tasks`, `/stop`, `/review`, `/goal`, `/queue`, `/moa`, `/learn`, `/heartbeat`·`/hb`, `/steer` (queues for next turn; mid-turn pending the TUI layer), `/worktree`, `/snapshot`, `/rollback` |
 | Tools & services | `/tools`, `/skills`, `/reload-skills`, `/mcp`, `/cron`, `/memory` |
 | Approvals | `/yolo`, `/approvals` |
 | Exit | `/quit`·`/exit`·`/q` |
@@ -41,7 +41,7 @@ tested commands**. Genuine remaining parity is now blocked by missing
 ### Blocked by architecture
 | Command(s) | Missing foundation |
 |---|---|
-| `/steer`, live `/queue`-while-running | A **concurrent-input TUI**: a reader active *during* a streaming turn (bottom input line + redraw). apollo's REPL is a single blocking `readLine` loop; there is no input during a turn. Non-verifiable headlessly (needs a real TTY). |
+| `/steer` (mid-turn), live `/queue`-while-running | The **Agent-side steer mechanism is built and tested** (`agent.steer` → injected after the next tool round; `AgentSteerSuite`), and `/steer` at the prompt queues for the next turn. What's still missing is the **concurrent-input TUI**: a reader active *during* a streaming turn (bottom input line + redraw), so you can type `/steer` while the turn runs. apollo's REPL is a single blocking `readLine` loop with no input during a turn. Non-verifiable headlessly (needs a real TTY). |
 | `/handoff` | **REPL↔gateway IPC** — the REPL can't hand a live session to a separate `apollo gateway` process. |
 | `/kanban`, `/plugins`, `/curator`, `/blueprint`, `/journey`, `/suggestions` | Whole subsystems apollo lacks: board model, plugin loader, skill-graph, suggestion engine. |
 
@@ -62,11 +62,11 @@ audio (`/voice`, `/wake`), browser CDP (`/browser`), and rich-TUI chrome toggles
    testable from CI. **To validate by hand:** run `apollo`, then
    `/hb every 20s say hi`, confirm it fires cleanly and the prompt still works
    afterward; `/hb clear` to stop.
-2. **No mock-transport seam in `Agent`.** `Agent.runTurn` selects a real
-   `WireTransport` internally, so turn-level behavior (e.g. an Agent-side
-   `/steer` injection after a tool round) cannot be unit-tested without first
-   building a fake-provider harness. `AgentSuite.scala` currently only covers
-   `Alternation`/`Compression`.
+2. ~~No mock-transport seam in `Agent`.~~ **Resolved:** the localhost mock
+   chat-completions server pattern (`NudgeIntegrationSuite`, and now
+   `AgentSteerSuite`) IS the seam — a real `Agent` runs against a mock HTTP
+   server, so turn-level behavior is testable end-to-end without an Agent ctor
+   change. Steer injection is verified this way on both platforms.
 
 ---
 
@@ -76,13 +76,16 @@ Each is a real project, not a command — scope and build with tests where the
 architecture allows, and expect the concurrent-input work to need hands-on TTY
 validation.
 
-1. **Concurrent-input TUI layer** — bottom input line + output-above redraw,
-   for both JLine (JVM) and the native termios editor. Unlocks `/steer` and
-   live `/queue`-while-running. Highest leverage; also the hardest and the least
-   headless-verifiable.
-2. **Agent mock-transport seam** — inject a fake `WireTransport` (e.g. via
-   `ToolContext` or an Agent ctor param) so `runTurn` is unit-testable. Cheap,
-   high value; unblocks testing steer/tool-round behavior.
+1. **Concurrent-input TUI layer** — the remaining piece for *mid-turn* `/steer`
+   and live `/queue`. Needs: (a) a `printAbove`-style method on `LineEditor`
+   (JLine has `LineReader.printAbove`; the native editor needs manual cursor
+   save / clear-line / reprint); (b) routing the turn's streaming callbacks
+   through it; (c) running the input reader on a fiber concurrently with the
+   turn (steer already flows through the thread-safe `agent.steer`). The Agent
+   half is done + tested; this layer's interactive terminal behavior is NOT
+   headlessly verifiable — needs hands-on TTY validation on both platforms.
+2. ~~Agent mock-transport seam~~ — **done** (the localhost-mock harness serves
+   this; `AgentSteerSuite` uses it). Agent-side steer is built and tested.
 3. **REPL↔gateway IPC** — a control channel (socket/file) so `/handoff` can pass
    a live session to a running `apollo gateway`.
 4. **Subsystems** — pick per need: plugin loader (`/plugins`), board model
