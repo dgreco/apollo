@@ -115,7 +115,7 @@ REPL slash commands (type `/help` in-session for the full list):
 |---|---|
 | **Session** | `/status` · `/history` (model, message count, token usage, context %), `/usage`, `/config`, `/profile`, `/reset` · `/new`, `/clear`, `/redraw`, `/title <name>`, `/compress` · `/compact` (force compaction), `/save [file.md]`, `/prompt` · `/compose` (multi-line), `/retry`, `/copy`, `/image <path>` (attach to next message), `/sessions`, `/resume <id\|latest>`, `/branch` · `/fork [name]` |
 | **Model** | `/model [name]`, `/reasoning <level>`, `/reasoning-display`, `/verbose`, `/version` · `/v`, `/whoami` |
-| **Work** | `/plan <task>`, `/init [notes]` (write AGENTS.md), `/diff [args]`, `/loop <prompt> [--times N] [--every S]`, `/bg <prompt>` (background session), `/agents` · `/tasks`, `/stop [id]`, `/review [focus]` (independent subagent review), `/worktree [list\|new [name]\|prune]`, `/snapshot [create\|list\|restore <id>\|prune]`, `/rollback [list\|create\|<number>]` (git working-tree checkpoints) |
+| **Work** | `/plan <task>`, `/init [notes]` (write AGENTS.md), `/diff [args]`, `/loop <prompt> [--times N] [--every S]`, `/bg <prompt>` (background session), `/agents` · `/tasks`, `/stop [id]`, `/review [focus]` (independent subagent review), `/goal [text\|show\|clear]` (standing objective), `/queue [prompt\|clear]`, `/moa <prompt>` (mixture-of-agents), `/worktree [list\|new [name]\|prune]`, `/snapshot [create\|list\|restore <id>\|prune]`, `/rollback [list\|create\|<number>]` (git working-tree checkpoints) |
 | **Tools & services** | `/tools`, `/skills`, `/reload-skills`, `/mcp` (server status + tools), `/cron` (scheduled jobs), `/memory` |
 | **Approvals** | `/yolo` (toggle bypass), `/approvals [manual\|off]` |
 | **Exit** | `/quit` · `/exit` · `/q` |

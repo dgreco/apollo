@@ -39,6 +39,8 @@ final class Repl(
   private var toolProgress = toolCtx.config.toolProgress != "off"
   private var sess         = sessionId // tracks the active session (changes on /resume)
   private var pendingImages = List.empty[Content.Image] // attached via /image, sent with the next turn
+  private var goal: Maybe[String] = Absent              // /goal — standing objective injected each turn
+  private var queued        = List.empty[String]        // /queue — prompts to run after the next turn
 
   def banner: String =
     val skillsLine = s"session ${Style.dim(sess)}"
@@ -60,8 +62,16 @@ final class Repl(
         if trimmed.isEmpty then loop
         else if trimmed.startsWith("/") then
           handleSlash(trimmed).map(continue => if continue then loop else ())
-        else runTurn(trimmed).andThen(loop)
+        else runTurn(trimmed).andThen(drainQueue).andThen(loop)
     }
+
+  /** Run any prompts stacked with /queue, in order, after a completed turn. */
+  private def drainQueue: Unit < (Sync & Async) =
+    queued match
+      case Nil => Sync.defer(())
+      case next :: rest =>
+        queued = rest
+        Console.printLine(Style.dim(s"· queued: $next")).andThen(runTurn(next)).andThen(drainQueue)
 
   private def runTurn(
       input: String,
@@ -80,7 +90,10 @@ final class Repl(
                   provider = runtime.providerSlug,
                   toolNames = tools
                 ))
-      system  = if systemSuffix.isEmpty then base else s"$base\n\n$systemSuffix"
+      withSuffix = if systemSuffix.isEmpty then base else s"$base\n\n$systemSuffix"
+      system  = goal match
+                  case Present(g) => s"$withSuffix\n\nStanding goal (keep working toward this across turns): $g"
+                  case Absent     => withSuffix
       userMsg = if pendingImages.isEmpty then Message.user(input)
                 else Message(Role.User, pendingImages.reverse :+ Content.Text(input), Absent)
       _       = pendingImages = Nil // consumed
@@ -243,6 +256,10 @@ final class Repl(
       case "snapshot" | "snap" => doSnapshot(arg)
       case "rollback" => doRollback(arg)
       case "prompt" | "compose" => doPrompt(arg)
+      case "goal" => doGoal(arg)
+      case "queue" => doQueue(arg)
+      case "moa" =>
+        if arg.isEmpty then Console.printLine("usage: /moa <prompt>").andThen(true) else doMoa(arg, 3)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
@@ -393,6 +410,64 @@ final class Repl(
       }
     }.andThen(true)
 
+  // --- /goal: standing objective injected into every turn's system prompt ----
+
+  private def doGoal(arg: String): Boolean < (Sync & Async) =
+    arg.toLowerCase match
+      case "" | "show" | "status" =>
+        Console.printLine(goal match
+          case Present(g) => s"goal: $g"
+          case Absent     => "no goal set (use /goal <text>)").andThen(true)
+      case "clear" | "off" =>
+        goal = Absent
+        Console.printLine("goal cleared").andThen(true)
+      case _ =>
+        goal = Present(arg)
+        Console.printLine(s"goal set: $arg").andThen(true)
+
+  // --- /queue: stack prompts to run after the next completed turn ------------
+
+  private def doQueue(arg: String): Boolean < (Sync & Async) =
+    arg.toLowerCase match
+      case "" =>
+        Console.printLine(
+          if queued.isEmpty then "queue empty"
+          else queued.zipWithIndex.map((p, i) => s"${i + 1}. $p").mkString("\n")
+        ).andThen(true)
+      case "clear" =>
+        queued = Nil
+        Console.printLine("queue cleared").andThen(true)
+      case _ =>
+        queued = queued :+ arg
+        Console.printLine(Style.dim(s"queued (${queued.length} pending) — runs after your next message")).andThen(true)
+
+  // --- /moa: mixture of agents — N answers in parallel, then synthesize ------
+
+  private def childAnswer(prompt: String, i: Int): String < (Sync & Async) =
+    Sync.defer(java.time.Instant.now()).map { now =>
+      val id    = store.newSessionId(now)
+      val flag  = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val child = new Agent(runtime, toolCtx, store, id, toolCtx.config.maxTurns, flag)
+      store.create(SessionMeta(id, Present(s"moa-$i"), "cli", runtime.model, runtime.providerSlug,
+          now.toEpochMilli / 1000.0, Absent, toolCtx.cwd.toString, 0, 0, Usage.zero))
+        .andThen(SystemPrompt.build(SystemPrompt.Input(toolCtx.config, toolCtx.paths, toolCtx.skills,
+          toolCtx.cwd, "cli", runtime.model, runtime.providerSlug, toolNames)))
+        .map(system => child.runTurn(Message.user(prompt), system, toolNames, TurnCallbacks()).map(_.finalResponse))
+    }
+
+  private def doMoa(prompt: String, n: Int): Boolean < (Sync & Async) =
+    val children = (1 to n).toList.map(i => childAnswer(prompt, i))
+    Console.printLine(Style.dim(s"· running $n agents in parallel…")).andThen {
+      Async.gather(children).map { answers =>
+        val combined = answers.toList.zipWithIndex
+          .map((a, i) => s"## Answer ${i + 1}\n$a").mkString("\n\n")
+        val synth =
+          s"$n independent agents answered the request below. Synthesize the single best response, " +
+            s"reconciling differences and keeping what is correct.\n\nRequest: $prompt\n\n$combined"
+        runTurn(synth).map(_ => ())
+      }
+    }.andThen(true)
+
   private def doBranch(name: String): Boolean < (Sync & Async) =
     val hist = agent.history
     Sync.defer(java.time.Instant.now()).map { now =>
@@ -510,6 +585,9 @@ final class Repl(
       |  /agents | /tasks         list background sessions
       |  /stop [id]               cancel a background session (all if no id)
       |  /review [focus]          independent subagent review of the conversation
+      |  /goal [text|show|clear]  standing objective injected into every turn
+      |  /queue [prompt|clear]    stack prompts to run after the next turn
+      |  /moa <prompt>            mixture-of-agents: 3 answers in parallel, then synthesize
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
