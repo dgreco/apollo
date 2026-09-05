@@ -99,6 +99,28 @@ class ReplCommandsSuite extends munit.FunSuite:
     assertEquals(ReplCommands.profileName(java.nio.file.Paths.get("/home/u/.apollo")), "default")
   }
 
+  test("parseLoop extracts prompt, times, every with defaults") {
+    assertEquals(ReplCommands.parseLoop("check the build"), ("check the build", 3, 0))
+    assertEquals(ReplCommands.parseLoop("poll --times 5 --every 30"), ("poll", 5, 30))
+    assertEquals(ReplCommands.parseLoop("a b --times 2 c"), ("a b c", 2, 0))
+    assertEquals(ReplCommands.parseLoop("x --times 0"), ("x", 1, 0)) // clamped to >=1
+  }
+
+  test("formatJobs empty and populated states") {
+    import apollo.cli.BackgroundSessions.*
+    def flag = new java.util.concurrent.atomic.AtomicBoolean(false)
+    assertEquals(ReplCommands.formatJobs(Nil), "no background sessions")
+    val jobs = List(
+      Job("b1", "do a thing", 1.0, Status.Running, flag),
+      Job("b2", "other", 2.0, Status.Done("text_response", 42), flag),
+      Job("b3", "boom", 3.0, Status.Failed("nope"), flag)
+    )
+    val out = ReplCommands.formatJobs(jobs)
+    assert(out.contains("b1") && out.contains("[running]"), out)
+    assert(out.contains("b2") && out.contains("done · text_response · 42 chars"), out)
+    assert(out.contains("b3") && out.contains("failed: nope"), out)
+  }
+
   test("clipboardCommand per OS") {
     assertEquals(ReplCommands.clipboardCommand("Mac OS X"), Some("pbcopy"))
     assertEquals(ReplCommands.clipboardCommand("Windows 11"), Some("clip"))

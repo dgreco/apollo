@@ -105,6 +105,31 @@ object ReplCommands:
     if parent.contains("profiles") then Option(home.getFileName).map(_.toString).getOrElse("default")
     else "default"
 
+  def formatJobs(jobs: List[BackgroundSessions.Job]): String =
+    if jobs.isEmpty then "no background sessions"
+    else jobs.map { j =>
+      val st = j.status match
+        case BackgroundSessions.Status.Running    => "running"
+        case BackgroundSessions.Status.Done(r, n) => s"done · $r · $n chars"
+        case BackgroundSessions.Status.Failed(m)  => s"failed: $m"
+        case BackgroundSessions.Status.Cancelled  => "cancelled"
+      s"${j.id}  [$st]  ${j.prompt.take(50)}"
+    }.mkString("\n")
+
+  /** Parse `/loop` args: "<prompt> [--times N] [--every S]" → (prompt, times, everySeconds).
+    * `times` defaults to 3 (bounded ≥1); `every` defaults to 0 (no delay). */
+  def parseLoop(arg: String): (String, Int, Int) =
+    var times = 3
+    var every = 0
+    val rest  = scala.collection.mutable.ListBuffer[String]()
+    @annotation.tailrec def go(ts: List[String]): Unit = ts match
+      case "--times" :: n :: r => times = n.toIntOption.getOrElse(times); go(r)
+      case "--every" :: n :: r => every = n.toIntOption.getOrElse(every); go(r)
+      case x :: r              => rest += x; go(r)
+      case Nil                 => ()
+    go(arg.split("\\s+").toList.filter(_.nonEmpty))
+    (rest.mkString(" "), math.max(1, times), math.max(0, every))
+
   /** Shell fragment that copies stdin/a file to the OS clipboard; None if the
     * OS is unknown. Composed into `sh -c "<cmd> < file"`.
     */

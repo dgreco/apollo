@@ -1,12 +1,12 @@
 package apollo.cli
 
-import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
+import apollo.agent.{Agent, SystemPrompt, TurnCallbacks, TurnResult}
 import apollo.core.*
 import apollo.config.Fs
 import apollo.cron.CronStore
 import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
-import apollo.session.SessionStore
+import apollo.session.{SessionStore, SessionMeta}
 import apollo.tools.{ToolContext, Toolsets, ToolRegistry}
 import kyo.*
 
@@ -61,10 +61,14 @@ final class Repl(
         else runTurn(trimmed).andThen(loop)
     }
 
-  private def runTurn(input: String): Unit < (Sync & Async) =
+  private def runTurn(
+      input: String,
+      tools: List[String] = toolNames,
+      systemSuffix: String = ""
+  ): TurnResult < (Sync & Async) =
     for
       _      <- Sync.defer(editor.onInterrupt(() => interruptFlag.set(true)))
-      system <- SystemPrompt.build(SystemPrompt.Input(
+      base   <- SystemPrompt.build(SystemPrompt.Input(
                   config = toolCtx.config,
                   paths = toolCtx.paths,
                   skills = toolCtx.skills,
@@ -72,15 +76,16 @@ final class Repl(
                   platform = "cli",
                   model = runtime.model,
                   provider = runtime.providerSlug,
-                  toolNames = toolNames
+                  toolNames = tools
                 ))
-      result <- agent.runTurn(Message.user(input), system, toolNames, callbacks)
+      system  = if systemSuffix.isEmpty then base else s"$base\n\n$systemSuffix"
+      result <- agent.runTurn(Message.user(input), system, tools, callbacks)
       _      <- Console.printLine("")
       _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
                   Console.printLine(Style.red(s"· ${result.exitReason}"))
                 else Sync.defer(())
-    yield ()
+    yield result
 
   private def callbacks: TurnCallbacks =
     TurnCallbacks(
@@ -195,38 +200,185 @@ final class Repl(
             Console.printLine(s"approval mode: $m").andThen(true)
           case _ =>
             Console.printLine("usage: /approvals [manual|off]").andThen(true)
+      case "clear" =>
+        agent.restore(Nil)
+        Sync.defer(print(clearScreen)).andThen(Console.printLine("cleared — fresh conversation")).andThen(true)
+      case "redraw" =>
+        Sync.defer(print(clearScreen)).andThen(Console.printLine(banner)).andThen(true)
+      case "title" =>
+        if arg.isEmpty then Console.printLine("usage: /title <name>").andThen(true)
+        else store.updateMeta(sess)(_.copy(title = Present(arg)))
+          .andThen(Console.printLine(s"title set: $arg")).andThen(true)
+      case "profile" =>
+        Console.printLine(s"profile ${ReplCommands.profileName(toolCtx.paths.home)} · home ${toolCtx.paths.home}").andThen(true)
+      case "whoami" =>
+        Console.printLine("cli · full access (apollo has no admin/user role split)").andThen(true)
+      case "usage" =>
+        val u = agent.usageSnapshot
+        Console.printLine(s"usage: ${ReplCommands.formatUsage(u)} · total ${u.total} · ${agent.apiCallCount} api calls").andThen(true)
+      case "diff" => doDiff(arg)
+      case "reload-skills" | "reload_skills" =>
+        toolCtx.skills.scan.map(sk => Console.printLine(s"rescanned skills: ${sk.length} installed")).andThen(true)
+      case "plan" =>
+        if arg.isEmpty then Console.printLine("usage: /plan <task>").andThen(true)
+        else runTurn(arg, tools = Nil, systemSuffix = planInstruction).andThen(true)
+      case "init" =>
+        runTurn(if arg.isEmpty then initInstruction else s"$initInstruction\n\nExtra notes: $arg").andThen(true)
+      case "branch" | "fork" => doBranch(arg)
+      case "bg" =>
+        if arg.isEmpty then Console.printLine("usage: /bg <prompt>").andThen(true) else doBg(arg)
+      case "agents" | "tasks" =>
+        Console.printLine(ReplCommands.formatJobs(BackgroundSessions.all)).andThen(true)
+      case "stop" => doStop(arg)
+      case "loop" | "proactive" => doLoopCmd(arg)
+      case "review" => doReview(arg)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
 
+  private val clearScreen = "[2J[3J[H"
+
+  private val planInstruction =
+    "Produce a concise, numbered implementation plan for the task. Do NOT run tools or make changes — planning only."
+
+  private val initInstruction =
+    "Scan this repository and write or update an AGENTS.md at the repo root describing the project, " +
+      "the build/test commands, the layout, and the conventions an agent should follow. Use your file tools."
+
+  private def doDiff(arg: String): Boolean < (Sync & Async) =
+    val g = if arg.isEmpty then "git diff" else s"git diff $arg"
+    Abort.run[CommandException](Command("sh", "-c", s"""cd "${toolCtx.cwd.toString}" && $g""").text).map {
+      case Result.Success(out) => Console.printLine(if out.trim.isEmpty then "(no changes)" else out)
+      case Result.Failure(e)   => Console.printLine(Style.red(s"git diff failed: ${e.getMessage}"))
+      case _                   => Console.printLine(Style.red("git diff failed"))
+    }.andThen(true)
+
+  private def doBranch(name: String): Boolean < (Sync & Async) =
+    val hist = agent.history
+    Sync.defer(java.time.Instant.now()).map { now =>
+      val newId = store.newSessionId(now)
+      val title = if name.nonEmpty then name else s"branch of $sess"
+      store.create(SessionMeta(newId, Present(title), "cli", runtime.model, runtime.providerSlug,
+          now.toEpochMilli / 1000.0, Absent, toolCtx.cwd.toString, hist.length, 0, Usage.zero))
+        .andThen(store.rewriteTranscript(newId, hist))
+        .andThen {
+          agent.resumeSession(newId, hist)
+          sess = newId
+          Console.printLine(s"branched to $newId ($title)")
+        }
+    }.andThen(true)
+
+  private def doBg(prompt: String): Boolean < (Sync & Async) =
+    Sync.defer(java.time.Instant.now()).map { now =>
+      val id    = store.newSessionId(now)
+      val flag  = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val child = new Agent(runtime, toolCtx, store, id, toolCtx.config.maxTurns, flag)
+      store.create(SessionMeta(id, Present(s"bg: ${prompt.take(40)}"), "cli", runtime.model,
+          runtime.providerSlug, now.toEpochMilli / 1000.0, Absent, toolCtx.cwd.toString, 0, 0, Usage.zero))
+        .andThen(SystemPrompt.build(SystemPrompt.Input(toolCtx.config, toolCtx.paths, toolCtx.skills,
+          toolCtx.cwd, "cli", runtime.model, runtime.providerSlug, toolNames)))
+        .map { system =>
+          BackgroundSessions.put(BackgroundSessions.Job(
+            id, prompt, now.toEpochMilli / 1000.0, BackgroundSessions.Status.Running, flag))
+          val work = child.runTurn(Message.user(prompt), system, toolNames, TurnCallbacks()).map { res =>
+            Sync.defer(BackgroundSessions.finish(id, res.exitReason, res.finalResponse.length))
+          }
+          Fiber.initUnscoped(work).andThen(Console.printLine(s"started background session $id — /agents to check"))
+        }
+    }.andThen(true)
+
+  private def doStop(arg: String): Boolean < (Sync & Async) =
+    if arg.isEmpty then
+      val running = BackgroundSessions.all.filter(_.status == BackgroundSessions.Status.Running)
+      running.foreach(j => BackgroundSessions.cancel(j.id))
+      Console.printLine(s"stopped ${running.length} background session(s)").andThen(true)
+    else
+      val ok = BackgroundSessions.cancel(arg)
+      Console.printLine(if ok then s"stopping $arg" else s"no background session $arg").andThen(true)
+
+  private def doLoopCmd(arg: String): Boolean < (Sync & Async) =
+    val (prompt, times, every) = ReplCommands.parseLoop(arg)
+    if prompt.isEmpty then Console.printLine("usage: /loop <prompt> [--times N] [--every S]").andThen(true)
+    else doLoop(prompt, times, every, 1).andThen(true)
+
+  private def doLoop(prompt: String, times: Int, every: Int, n: Int): Unit < (Sync & Async) =
+    if n > times then Console.printLine(Style.dim(s"· loop complete ($times runs)"))
+    else
+      Console.printLine(Style.dim(s"· loop $n/$times")).andThen(runTurn(prompt)).map { res =>
+        if res.interrupted then Console.printLine(Style.dim("· loop interrupted"))
+        else if n >= times then Console.printLine(Style.dim(s"· loop complete ($times runs)"))
+        else if every > 0 then Async.sleep(every.seconds).andThen(doLoop(prompt, times, every, n + 1))
+        else doLoop(prompt, times, every, n + 1)
+      }
+
+  private def doReview(instructions: String): Boolean < (Sync & Async) =
+    val hist = agent.history
+    if hist.isEmpty then Console.printLine("nothing to review yet").andThen(true)
+    else
+      Sync.defer(java.time.Instant.now()).map { now =>
+        val id       = store.newSessionId(now)
+        val flag     = new java.util.concurrent.atomic.AtomicBoolean(false)
+        val reviewer = new Agent(runtime, toolCtx, store, id, toolCtx.config.maxTurns, flag)
+        reviewer.restore(hist)
+        val ask =
+          "Review the conversation above as an independent critic: point out bugs, risks, and gaps. " +
+            "Do not execute tools." + (if instructions.nonEmpty then s" Focus: $instructions" else "")
+        store.create(SessionMeta(id, Present("review"), "cli", runtime.model, runtime.providerSlug,
+            now.toEpochMilli / 1000.0, Absent, toolCtx.cwd.toString, hist.length, 0, Usage.zero))
+          .andThen(SystemPrompt.build(SystemPrompt.Input(toolCtx.config, toolCtx.paths, toolCtx.skills,
+            toolCtx.cwd, "cli", runtime.model, runtime.providerSlug, Nil)))
+          .map { system =>
+            Console.printLine(Style.dim("· running review subagent…"))
+              .andThen(reviewer.runTurn(Message.user(ask), system, Nil, callbacks))
+              .andThen(Console.printLine(""))
+          }
+      }.andThen(true)
+
   private def helpText: String =
     """commands
-      |  /help                  this help
-      |  /version | /v          show apollo + model version
-      |  /model [name]          show or switch the model (provider:model or bare id)
-      |  /reasoning <level>     none|minimal|low|medium|high|xhigh|max
-      |  /reasoning-display     toggle thinking display
-      |  /verbose               toggle tool-progress display
+      |  /help                    this help
+      |  /version | /v            show apollo + model version
+      |  /whoami                  show access level
+      |  /model [name]            show or switch the model (provider:model or bare id)
+      |  /reasoning <level>       none|minimal|low|medium|high|xhigh|max
+      |  /reasoning-display       toggle thinking display
+      |  /verbose                 toggle tool-progress display
       |session
-      |  /status | /history     model, message count, token usage, context %
-      |  /config                effective configuration summary
-      |  /reset | /new          clear the conversation
-      |  /compress | /compact   force context compaction before the next call
-      |  /save [file.md]        write the transcript to Markdown (default <session>.md)
-      |  /retry                 re-run the last user turn
-      |  /copy                  copy the last reply to the clipboard
-      |  /sessions              list previous sessions
-      |  /resume <id|latest>    resume a previous session
+      |  /status | /history       model, message count, token usage, context %
+      |  /usage                   cumulative token usage
+      |  /config                  effective configuration summary
+      |  /profile                 active profile and home dir
+      |  /reset | /new            clear the conversation
+      |  /clear                   clear screen + fresh conversation
+      |  /redraw                  repaint the banner
+      |  /title <name>            name the current session
+      |  /compress | /compact     force context compaction before the next call
+      |  /save [file.md]          write the transcript to Markdown (default <session>.md)
+      |  /retry                   re-run the last user turn
+      |  /copy                    copy the last reply to the clipboard
+      |  /sessions                list previous sessions
+      |  /resume <id|latest>      resume a previous session
+      |  /branch | /fork [name]   fork this session into a new one
+      |work
+      |  /plan <task>             write a plan without executing
+      |  /init [notes]            generate/update AGENTS.md from a repo scan
+      |  /diff [args]             git diff of the working tree
+      |  /loop <prompt> [--times N] [--every S]   re-run a prompt N times
+      |  /bg <prompt>             run a prompt in a background session
+      |  /agents | /tasks         list background sessions
+      |  /stop [id]               cancel a background session (all if no id)
+      |  /review [focus]          independent subagent review of the conversation
       |tools & services
-      |  /tools                 list active tools
-      |  /skills                list available skills
-      |  /mcp                   MCP server status and tools
-      |  /cron                  list scheduled jobs
-      |  /memory                show recorded memory
+      |  /tools                   list active tools
+      |  /skills                  list available skills
+      |  /reload-skills           re-scan installed skills
+      |  /mcp                     MCP server status and tools
+      |  /cron                    list scheduled jobs
+      |  /memory                  show recorded memory
       |approvals
-      |  /yolo                  toggle dangerous-command approval bypass
+      |  /yolo                    toggle dangerous-command approval bypass
       |  /approvals [manual|off]  show or set the approval mode
-      |  /quit | /exit          exit""".stripMargin
+      |  /quit | /exit            exit""".stripMargin
 
   private def doResume(target: String): Boolean < (Sync & Async) =
     store.find(target).map {
