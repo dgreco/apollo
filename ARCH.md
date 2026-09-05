@@ -304,7 +304,7 @@ sequenceDiagram
   participant Caller as Caller (REPL / SessionHub)
   participant Agent
   participant Nudge as Nudges
-  participant Alt as Alternation
+  participant Altr as Alternation
   participant Comp as Compression
   participant Wire as WireTransport + adapter
   participant Prov as Provider (HTTPS/SSE)
@@ -312,16 +312,16 @@ sequenceDiagram
   participant Store as SessionStore
 
   Caller->>Agent: runTurn(userMsg, systemPrompt, toolNames, callbacks)
-  Agent->>Agent: reset interrupt; lazily hydrate nudge counters
+  Agent->>Agent: reset interrupt, lazily hydrate nudge counters
   Agent->>Nudge: tick(state, settings)
   Nudge-->>Agent: maybe reminder → append to THIS turn's system prompt
   Agent->>Store: appendMessage(userMsg)   %% clean, no nudge
   loop until final text / budget / interrupt
     Agent->>Comp: maybeCompress() if near context limit
-    Agent->>Alt: repair(messages)
+    Agent->>Altr: repair(messages)
     Agent->>Reg: definitions(toolNames) → tool specs
     Agent->>Wire: callWithFallback → streamTurn(request)
-    Wire->>Prov: POST + SSE (per-provider retry; fallback on failure)
+    Wire->>Prov: POST + SSE (per-provider retry, fallback on failure)
     Prov-->>Wire: text/thinking/tool-use deltas
     Wire-->>Caller: onEvent → callbacks (render / live-edit)
     Wire-->>Agent: TurnResponse (assistant message)
@@ -331,7 +331,7 @@ sequenceDiagram
     else has tool calls
       loop each tool call (sequential)
         Agent->>Reg: dispatch(name, argsJson, ctx)
-        Note over Reg: approval gate (terminal) / trust gate (MCP);<br/>MCP tools route via McpServerHandle → client
+        Note over Reg: approval gate (terminal) / trust gate (MCP)<br/>MCP tools route via McpServerHandle → client
         Reg-->>Agent: ToolResult (output, isError)
       end
       Agent->>Store: appendMessage(tool results)
