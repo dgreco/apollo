@@ -194,4 +194,53 @@ object ReplCommands:
     else if os.contains("nux") || os.contains("nix") then
       Some("wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null || xsel -b 2>/dev/null")
     else None
+
+  // --- /blueprint: automation templates that create cron jobs ---------------
+
+  /** A named automation template: a prompt (with `{slot}` placeholders) run on a
+    * schedule. `slots` provides defaults, overridable as `k=v` args. */
+  final case class Blueprint(name: String, description: String, template: String,
+                             schedule: String, slots: Map[String, String])
+
+  val blueprints: List[Blueprint] = List(
+    Blueprint("daily-summary", "Daily progress summary",
+      "Summarize progress on {topic} and list the next steps.", "every 24h", Map("topic" -> "the project")),
+    Blueprint("hourly-check", "Hourly check of a target",
+      "Check {target} and report anything that needs attention.", "every 1h", Map("target" -> "the build")),
+    Blueprint("standup", "Brief standup",
+      "Give a brief standup: what is done, what is in progress, and what is blocked.", "every 24h", Map.empty)
+  )
+
+  def parseSlots(tokens: List[String]): Map[String, String] =
+    tokens.flatMap(t => t.split("=", 2) match { case Array(k, v) => Some(k.trim -> v.trim); case _ => None }).toMap
+
+  def renderTemplate(template: String, slots: Map[String, String]): String =
+    slots.foldLeft(template) { case (acc, (k, v)) => acc.replace("{" + k + "}", v) }
+
+  def formatBlueprints(bs: List[Blueprint]): String =
+    if bs.isEmpty then "no blueprints"
+    else bs.map(b => s"${b.name}  —  ${b.description}  (${b.schedule})").mkString("\n")
+
+  // --- /kanban: a local board (columns of cards over a text file) -----------
+
+  val kanbanColumns: List[String] = List("todo", "doing", "done")
+
+  final case class KanbanCard(id: String, col: String, text: String)
+
+  def renderBoardFile(cards: List[KanbanCard]): String =
+    cards.map(c => s"${c.col}\t${c.id}\t${c.text.replace('\t', ' ').replace('\n', ' ')}").mkString("\n")
+
+  def parseBoard(s: String): List[KanbanCard] =
+    s.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>
+      line.split("\t", 3) match
+        case Array(col, id, text) => Some(KanbanCard(id, col, text))
+        case _                    => None
+    }.toList
+
+  def renderBoard(cards: List[KanbanCard]): String =
+    kanbanColumns.map { col =>
+      val items = cards.filter(_.col == col)
+      val body  = if items.isEmpty then "  (empty)" else items.map(c => s"  [${c.id}] ${c.text}").mkString("\n")
+      s"$col:\n$body"
+    }.mkString("\n")
 end ReplCommands

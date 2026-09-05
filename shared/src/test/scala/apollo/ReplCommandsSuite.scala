@@ -175,6 +175,35 @@ class ReplCommandsSuite extends munit.FunSuite:
     assertEquals(ReplCommands.worktreeCommand("bogus"), None)
   }
 
+  test("blueprint slot parsing + template rendering") {
+    assertEquals(ReplCommands.parseSlots(List("topic=infra", "x=y")), Map("topic" -> "infra", "x" -> "y"))
+    assertEquals(ReplCommands.renderTemplate("do {topic} now", Map("topic" -> "infra")), "do infra now")
+    // unfilled slots are left intact
+    assertEquals(ReplCommands.renderTemplate("do {topic}", Map.empty), "do {topic}")
+    assert(ReplCommands.formatBlueprints(ReplCommands.blueprints).contains("daily-summary"))
+    assert(ReplCommands.blueprints.forall(_.name.nonEmpty))
+  }
+
+  test("kanban board round-trips and renders by column") {
+    val cards = List(
+      ReplCommands.KanbanCard("a1", "todo", "write docs"),
+      ReplCommands.KanbanCard("b2", "doing", "fix bug")
+    )
+    val file = ReplCommands.renderBoardFile(cards)
+    assertEquals(ReplCommands.parseBoard(file), cards) // round-trip
+    assertEquals(ReplCommands.parseBoard(""), Nil)
+    val board = ReplCommands.renderBoard(cards)
+    assert(board.contains("todo:") && board.contains("[a1] write docs"), board)
+    assert(board.contains("doing:") && board.contains("[b2] fix bug"), board)
+    assert(board.contains("done:") && board.contains("(empty)"), board) // empty column shown
+  }
+
+  test("kanban card text with tabs/newlines is sanitized on write") {
+    val cards = List(ReplCommands.KanbanCard("x", "todo", "a\tb\nc"))
+    val parsed = ReplCommands.parseBoard(ReplCommands.renderBoardFile(cards))
+    assertEquals(parsed, List(ReplCommands.KanbanCard("x", "todo", "a b c")))
+  }
+
   test("clipboardCommand per OS") {
     assertEquals(ReplCommands.clipboardCommand("Mac OS X"), Some("pbcopy"))
     assertEquals(ReplCommands.clipboardCommand("Windows 11"), Some("clip"))

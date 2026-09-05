@@ -10,7 +10,7 @@ the work can be resumed later without re-deriving the context.
 `display.async_input` mode is unit-tested but its interactive terminal behavior
 is pending hands-on TTY validation.
 
-apollo's REPL went from **12 commands (2 of them dead stubs)** to **~50 real,
+apollo's REPL went from **12 commands (2 of them dead stubs)** to **~53 real,
 tested commands**. Genuine remaining parity is now blocked by missing
 *architecture*, not by effort — see "Not built" and "Resume roadmap".
 
@@ -45,7 +45,8 @@ tested commands**. Genuine remaining parity is now blocked by missing
 |---|---|
 | `/steer` (mid-turn), live `/queue`-while-running | **Built (opt-in), pending TTY validation.** Set `display.async_input: true` — turns run on a background fiber, a single persistent `readLine` stays live, and output streams above via `LineEditor.printAbove` (JLine). You can then type `/steer`, `/stop`, `/queue`, or plain follow-ups *during* a turn. Logic + line-buffering are unit-tested; the interactive terminal behavior is JVM/JLine-only and **not** headlessly verifiable — validate on a real terminal. Native has no concurrent-input TUI (printAbove = plain println). |
 | `/handoff` | **REPL↔gateway IPC** — the REPL can't hand a live session to a separate `apollo gateway` process. |
-| `/kanban`, `/plugins`, `/curator`, `/blueprint`, `/journey`, `/suggestions` | Whole subsystems apollo lacks: board model, plugin loader, skill-graph, suggestion engine. |
+| ~~`/blueprint`~~, ~~`/kanban`~~, ~~`/curator`~~ | **Built** — `/blueprint` (templates → cron jobs), `/kanban` (local board), `/curator` (skill list/archive/restore). |
+| `/plugins`, `/suggestions`, `/journey` | Declined — no real foundation: apollo has no plugin loader (`/plugins`) or suggestion engine (`/suggestions`), and `/journey` has no learning-log store (would just duplicate `/sessions`). Not stubbed. |
 
 ### Out of apollo's scope
 Nous backend (`/subscription`, `/topup`, `/insights`, `/update`, `/debug`),
@@ -94,9 +95,12 @@ validation.
    this; `AgentSteerSuite` uses it). Agent-side steer is built and tested.
 3. **REPL↔gateway IPC** — a control channel (socket/file) so `/handoff` can pass
    a live session to a running `apollo gateway`.
-4. **Subsystems** — pick per need: plugin loader (`/plugins`), board model
-   (`/kanban`), suggestion engine (`/suggestions`), skill-graph (`/journey`),
-   skill maintenance (`/curator`), automation templates (`/blueprint`).
+4. **Subsystems** — the buildable ones are done: `/blueprint` (cron templates),
+   `/kanban` (local board), `/curator` (skill archive/restore). The rest need
+   foundations apollo doesn't have and were declined, not stubbed: `/plugins`
+   (no plugin loader), `/suggestions` (no suggestion engine), `/journey` (no
+   learning-log; would duplicate `/sessions`). Building any of those means
+   building the subsystem first.
 
 ---
 

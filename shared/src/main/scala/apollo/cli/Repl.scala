@@ -3,8 +3,8 @@ package apollo.cli
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks, TurnResult}
 import apollo.core.*
 import apollo.config.Fs
-import apollo.cron.CronStore
-import apollo.util.Crypto
+import apollo.cron.{CronStore, CronJob, Schedule}
+import apollo.util.{Crypto, Jx}
 import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
 import apollo.session.{SessionStore, SessionMeta}
@@ -363,6 +363,9 @@ final class Repl(
       case "review" => doReview(arg)
       case "image" =>
         if arg.isEmpty then Console.printLine("usage: /image <path>").andThen(true) else doImage(arg)
+      case "blueprint" | "bp" => doBlueprint(arg)
+      case "kanban" => doKanban(arg)
+      case "curator" => doCurator(arg)
       case "worktree" => doWorktree(arg)
       case "snapshot" | "snap" => doSnapshot(arg)
       case "rollback" => doRollback(arg)
@@ -468,6 +471,102 @@ final class Repl(
         }.andThen(true)
       case _ =>
         Console.printLine("usage: /snapshot [create | list | restore <id> | prune]").andThen(true)
+
+  // --- /blueprint: instantiate an automation template as a cron job ----------
+
+  private def doBlueprint(arg: String): Boolean < (Sync & Async) =
+    arg.split("\\s+").toList.filter(_.nonEmpty) match
+      case Nil | ("list" :: _) =>
+        Console.printLine(ReplCommands.formatBlueprints(ReplCommands.blueprints)).andThen(true)
+      case name :: rest =>
+        ReplCommands.blueprints.find(_.name == name) match
+          case None => Console.printLine(s"unknown blueprint: $name (see /blueprint)").andThen(true)
+          case Some(bp) =>
+            val prompt = ReplCommands.renderTemplate(bp.template, bp.slots ++ ReplCommands.parseSlots(rest))
+            Sync.defer(java.time.Instant.now()).map { now =>
+              Schedule.parse(bp.schedule, now) match
+                case Result.Failure(e) => Console.printLine(Style.red(s"blueprint schedule error: $e"))
+                case Result.Success((kind, expr, nextRun)) =>
+                  val id  = s"job-${java.util.UUID.randomUUID.toString.take(8)}"
+                  val job = CronJob(id, s"blueprint:$name", prompt, kind, expr, bp.schedule,
+                    enabled = true, state = "scheduled", nextRunAt = nextRun.map(_.getEpochSecond.toDouble),
+                    lastRunAt = Absent, lastStatus = Absent, deliver = Absent, raw = Jx.obj())
+                  new CronStore(toolCtx.paths).upsert(job)
+                    .andThen(Console.printLine(s"created cron job $id from '$name': $prompt"))
+                case _ => Console.printLine(Style.red("blueprint schedule parse failed"))
+            }.andThen(true)
+
+  // --- /kanban: a local board (columns of cards) -----------------------------
+
+  private def kanbanFile = toolCtx.paths.home.resolve("kanban.txt")
+
+  private def loadBoard: List[ReplCommands.KanbanCard] < Sync =
+    Fs.readString(kanbanFile).map(s => ReplCommands.parseBoard(s.getOrElse("")))
+
+  private def saveBoard(cards: List[ReplCommands.KanbanCard]): Unit < Sync =
+    Fs.writeString(kanbanFile, ReplCommands.renderBoardFile(cards))
+
+  private def doKanban(arg: String): Boolean < (Sync & Async) =
+    arg.split("\\s+", 3).toList.filter(_.nonEmpty) match
+      case Nil | ("show" :: _) | ("list" :: _) =>
+        loadBoard.map(cards => Console.printLine(ReplCommands.renderBoard(cards))).andThen(true)
+      case "add" :: col :: text :: Nil if ReplCommands.kanbanColumns.contains(col) =>
+        loadBoard.map { cards =>
+          val id = java.util.UUID.randomUUID.toString.take(4)
+          saveBoard(cards :+ ReplCommands.KanbanCard(id, col, text))
+            .andThen(Console.printLine(s"added [$id] to $col"))
+        }.andThen(true)
+      case "move" :: id :: col :: Nil if ReplCommands.kanbanColumns.contains(col) =>
+        loadBoard.map { cards =>
+          if cards.exists(_.id == id) then
+            saveBoard(cards.map(c => if c.id == id then c.copy(col = col) else c))
+              .andThen(Console.printLine(s"moved $id → $col"))
+          else Console.printLine(s"no card $id")
+        }.andThen(true)
+      case ("rm" | "remove") :: id :: _ =>
+        loadBoard.map { cards =>
+          if cards.exists(_.id == id) then
+            saveBoard(cards.filterNot(_.id == id)).andThen(Console.printLine(s"removed $id"))
+          else Console.printLine(s"no card $id")
+        }.andThen(true)
+      case _ =>
+        Console.printLine("usage: /kanban [show | add <todo|doing|done> <text> | move <id> <col> | rm <id>]").andThen(true)
+
+  // --- /curator: skill maintenance — list / archive / restore ----------------
+
+  private def archivedSkillsDir = toolCtx.paths.home.resolve("skills-archived")
+
+  private def doCurator(arg: String): Boolean < (Sync & Async) =
+    arg.split("\\s+", 2).toList.filter(_.nonEmpty) match
+      case Nil | ("status" :: _) | ("list" :: _) =>
+        toolCtx.skills.scan.map { sk =>
+          Console.printLine(
+            if sk.isEmpty then "no skills installed"
+            else sk.sortBy(s => (s.category, s.name)).map(s => s"${s.category}/${s.name}").mkString("\n"))
+        }.andThen(true)
+      case "archive" :: name :: Nil =>
+        toolCtx.skills.scan.map { sk =>
+          sk.find(_.name == name) match
+            case None => Console.printLine(s"no skill '$name'")
+            case Some(s) =>
+              val dest = archivedSkillsDir.resolve(name)
+              sh(s"mkdir -p ${q(archivedSkillsDir.toString)} && mv ${q(s.dir.toString)} ${q(dest.toString)}").map {
+                case Result.Success(_) => Console.printLine(s"archived $name → $dest")
+                case _                 => Console.printLine(Style.red(s"archive failed for $name"))
+              }
+        }.andThen(true)
+      case "restore" :: name :: Nil =>
+        val src  = archivedSkillsDir.resolve(name)
+        val dest = toolCtx.paths.skillsDir.resolve(name)
+        Fs.exists(src).map { ex =>
+          if !ex then Console.printLine(s"no archived skill '$name'")
+          else sh(s"mkdir -p ${q(toolCtx.paths.skillsDir.toString)} && mv ${q(src.toString)} ${q(dest.toString)}").map {
+            case Result.Success(_) => Console.printLine(s"restored $name")
+            case _                 => Console.printLine(Style.red(s"restore failed for $name"))
+          }
+        }.andThen(true)
+      case _ =>
+        Console.printLine("usage: /curator [status | archive <name> | restore <name>]").andThen(true)
 
   // --- /rollback: git working-tree checkpoints (manual create + restore) -----
 
@@ -744,6 +843,9 @@ final class Repl(
       |  /learn <what>            capture something as a reusable skill
       |  /heartbeat | /hb [every <interval> <prompt>|status|pause|resume|clear]   recurring idle prompt
       |  /steer <message>         inject guidance after the next tool call
+      |  /blueprint | /bp [name [k=v…]]   create a cron job from an automation template
+      |  /kanban [show|add <col> <text>|move <id> <col>|rm <id>]   local task board
+      |  /curator [status|archive <name>|restore <name>]   skill maintenance
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
