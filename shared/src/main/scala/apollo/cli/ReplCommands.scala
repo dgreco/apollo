@@ -130,6 +130,22 @@ object ReplCommands:
     go(arg.split("\\s+").toList.filter(_.nonEmpty))
     (rest.mkString(" "), math.max(1, times), math.max(0, every))
 
+  /** Parse `git for-each-ref ... %(refname)|%(creatordate:iso)` into (ref, date). */
+  def parseCheckpoints(out: String): List[(String, String)] =
+    out.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>
+      line.split("\\|", 2) match
+        case Array(ref, date) => Some((ref, date))
+        case Array(ref)       => Some((ref, ""))
+        case _                => None
+    }.toList
+
+  /** Numbered, newest-first checkpoint listing for `/rollback`. */
+  def formatCheckpoints(cks: List[(String, String)]): String =
+    if cks.isEmpty then "no checkpoints (create one with /rollback create)"
+    else cks.zipWithIndex.map { case ((ref, date), i) =>
+      s"${i + 1}  ${ref.stripPrefix("refs/apollo/ckpt/")}  $date"
+    }.mkString("\n")
+
   /** Image media type from a file extension; None if unsupported. */
   def imageMediaType(path: String): Option[String] =
     val lower = path.toLowerCase

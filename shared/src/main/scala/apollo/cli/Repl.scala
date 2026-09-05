@@ -241,6 +241,8 @@ final class Repl(
         if arg.isEmpty then Console.printLine("usage: /image <path>").andThen(true) else doImage(arg)
       case "worktree" => doWorktree(arg)
       case "snapshot" | "snap" => doSnapshot(arg)
+      case "rollback" => doRollback(arg)
+      case "prompt" | "compose" => doPrompt(arg)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
@@ -325,6 +327,71 @@ final class Repl(
         }.andThen(true)
       case _ =>
         Console.printLine("usage: /snapshot [create | list | restore <id> | prune]").andThen(true)
+
+  // --- /rollback: git working-tree checkpoints (manual create + restore) -----
+
+  /** Snapshot the working tree (tracked + newly-added) into a ref without
+    * touching the index/HEAD/working tree, via a throwaway index. */
+  private def createCkptCmd(id: String): String =
+    "cd " + q(toolCtx.cwd.toString) + " && " +
+      "idx=$(git rev-parse --git-path index) && " +
+      "tmpidx=$(mktemp) && cp \"$idx\" \"$tmpidx\" 2>/dev/null || true; " +
+      "GIT_INDEX_FILE=\"$tmpidx\" git add -A && " +
+      "tree=$(GIT_INDEX_FILE=\"$tmpidx\" git write-tree) && " +
+      "commit=$(git commit-tree \"$tree\" -p HEAD -m 'apollo checkpoint') && " +
+      "git update-ref refs/apollo/ckpt/" + id + " \"$commit\" && " +
+      "rm -f \"$tmpidx\""
+
+  private def captureCkpts: List[(String, String)] < (Sync & Async) =
+    sh(s"cd ${q(toolCtx.cwd.toString)} && " +
+      "git for-each-ref --sort=-refname refs/apollo/ckpt/ --format='%(refname)|%(creatordate:iso)'").map {
+      case Result.Success(out) => ReplCommands.parseCheckpoints(out)
+      case _                   => Nil
+    }
+
+  private def doRollback(arg: String): Boolean < (Sync & Async) =
+    arg.split("\\s+").toList.filter(_.nonEmpty) match
+      case Nil | ("list" :: _) =>
+        captureCkpts.map(cks => Console.printLine(ReplCommands.formatCheckpoints(cks))).andThen(true)
+      case "create" :: _ =>
+        Sync.defer(java.time.Instant.now().toEpochMilli.toString).map { id =>
+          sh(createCkptCmd(id)).map {
+            case Result.Success(_) => Console.printLine(s"checkpoint created: $id")
+            case Result.Failure(e) => Console.printLine(Style.red(s"checkpoint failed: ${e.getMessage}"))
+            case _                 => Console.printLine(Style.red("checkpoint failed"))
+          }
+        }.andThen(true)
+      case n :: _ if n.toIntOption.isDefined =>
+        captureCkpts.map { cks =>
+          cks.lift(n.toInt - 1) match
+            case Some((ref, _)) =>
+              sh(s"cd ${q(toolCtx.cwd.toString)} && git checkout ${q(ref)} -- .").map {
+                case Result.Success(_) => Console.printLine(s"rolled back to checkpoint $n ($ref)")
+                case Result.Failure(e) => Console.printLine(Style.red(s"rollback failed: ${e.getMessage}"))
+                case _                 => Console.printLine(Style.red("rollback failed"))
+              }
+            case None => Console.printLine(s"no checkpoint #$n (see /rollback list)")
+        }.andThen(true)
+      case _ =>
+        Console.printLine("usage: /rollback [list | create | <number>]").andThen(true)
+
+  // --- /prompt: inline multi-line compose (portable; no $EDITOR handoff) ------
+
+  private def collectLines(acc: List[String]): List[String] < (Sync & Async) =
+    editor.readLine(Style.dim("… ")).map {
+      case Absent => acc
+      case Present(line) =>
+        if line.trim == "." then acc else collectLines(acc :+ line)
+    }
+
+  private def doPrompt(initial: String): Boolean < (Sync & Async) =
+    Console.printLine(Style.dim("compose — finish with a line containing only '.'")).andThen {
+      collectLines(if initial.nonEmpty then List(initial) else Nil).map { lines =>
+        val text = lines.mkString("\n").trim
+        if text.isEmpty then Console.printLine("(empty — nothing sent)")
+        else runTurn(text).map(_ => ())
+      }
+    }.andThen(true)
 
   private def doBranch(name: String): Boolean < (Sync & Async) =
     val hist = agent.history
@@ -427,6 +494,7 @@ final class Repl(
       |  /title <name>            name the current session
       |  /compress | /compact     force context compaction before the next call
       |  /save [file.md]          write the transcript to Markdown (default <session>.md)
+      |  /prompt | /compose [text]   compose a multi-line message (end with '.')
       |  /retry                   re-run the last user turn
       |  /copy                    copy the last reply to the clipboard
       |  /image <path>            attach an image to your next message
@@ -444,6 +512,7 @@ final class Repl(
       |  /review [focus]          independent subagent review of the conversation
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
+      |  /rollback [list|create|<number>]     git working-tree checkpoints
       |tools & services
       |  /tools                   list active tools
       |  /skills                  list available skills

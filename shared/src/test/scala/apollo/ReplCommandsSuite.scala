@@ -121,6 +121,18 @@ class ReplCommandsSuite extends munit.FunSuite:
     assert(out.contains("b3") && out.contains("failed: nope"), out)
   }
 
+  test("parseCheckpoints + formatCheckpoints number newest-first") {
+    assertEquals(ReplCommands.parseCheckpoints(""), Nil)
+    val out = "refs/apollo/ckpt/200|2026-09-05 10:00:00 +0000\nrefs/apollo/ckpt/100|2026-09-05 09:00:00 +0000\n"
+    val cks = ReplCommands.parseCheckpoints(out)
+    assertEquals(cks, List(("refs/apollo/ckpt/200", "2026-09-05 10:00:00 +0000"),
+                           ("refs/apollo/ckpt/100", "2026-09-05 09:00:00 +0000")))
+    val fmt = ReplCommands.formatCheckpoints(cks)
+    assert(fmt.contains("1  200  2026-09-05 10:00:00"), fmt)
+    assert(fmt.contains("2  100  2026-09-05 09:00:00"), fmt)
+    assert(ReplCommands.formatCheckpoints(Nil).contains("no checkpoints"))
+  }
+
   test("imageMediaType by extension") {
     assertEquals(ReplCommands.imageMediaType("a/b/pic.PNG"), Some("image/png"))
     assertEquals(ReplCommands.imageMediaType("x.jpeg"), Some("image/jpeg"))
