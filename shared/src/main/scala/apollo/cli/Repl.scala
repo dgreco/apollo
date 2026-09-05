@@ -260,6 +260,13 @@ final class Repl(
       case "queue" => doQueue(arg)
       case "moa" =>
         if arg.isEmpty then Console.printLine("usage: /moa <prompt>").andThen(true) else doMoa(arg, 3)
+      case "learn" =>
+        if arg.isEmpty then Console.printLine("usage: /learn <what to capture as a skill>").andThen(true)
+        else runTurn(
+          "Create a reusable skill capturing the following, using your skill-management tool " +
+            "(give it a name, a concise description, and the steps/knowledge). If no skill tool is " +
+            s"available, say so instead.\n\nCapture: $arg"
+        ).andThen(true)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
@@ -588,6 +595,7 @@ final class Repl(
       |  /goal [text|show|clear]  standing objective injected into every turn
       |  /queue [prompt|clear]    stack prompts to run after the next turn
       |  /moa <prompt>            mixture-of-agents: 3 answers in parallel, then synthesize
+      |  /learn <what>            capture something as a reusable skill
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
