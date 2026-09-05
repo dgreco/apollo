@@ -42,6 +42,15 @@ object PlatformEditor:
 
     private val history = ArrayBuffer.empty[String]
 
+    // Shared state so printAbove (called from the turn fiber) can redraw the
+    // input line the edit loop (blocked in readByte on another fiber) owns.
+    private val ioLock = new AnyRef
+    @volatile private var reading   = false
+    @volatile private var curPrompt = ""
+    @volatile private var curLine   = ""  // current visible buffer contents
+    @volatile private var curBack   = 0   // columns from line end back to the cursor
+    @volatile private var curMask   = false
+
     def readLine(prompt: String): Maybe[String] < (Sync & Async) =
       Sync.defer(edit(prompt, mask = false))
 
@@ -52,9 +61,23 @@ object PlatformEditor:
 
     def isInteractive: Boolean < Sync = Sync.defer(true)
 
-    // Native has no concurrent-input TUI yet; plain newline print (async_input
-    // mode is JVM-only in practice — see REPL_PARITY.md).
-    def printAbove(text: String): Unit < Sync = Sync.defer(println(text))
+    // Emit output above the live input line: erase the line, print the text,
+    // then reprint the prompt + current buffer and restore the cursor. Serialized
+    // with the edit loop's own redraw via ioLock so their writes never interleave.
+    def printAbove(text: String): Unit < Sync = Sync.defer {
+      ioLock.synchronized {
+        if reading && !curMask then
+          print("\r[K")
+          print(text)
+          print("\n")
+          print(s"$curPrompt$curLine")
+          if curBack > 0 then print(s"[${curBack}D")
+          java.lang.System.out.flush()
+        else
+          println(text)
+      }
+      ()
+    }
 
     private def edit(prompt: String, mask: Boolean): Maybe[String] =
       withRawMode {
@@ -67,10 +90,12 @@ object PlatformEditor:
         def redraw(): Unit =
           val shown = if mask then "*" * buffer.length else buffer.mkString
           val back  = buffer.length - cursor
+          curPrompt = prompt; curLine = shown; curBack = back; curMask = mask // for a concurrent printAbove
           print(s"\r\u001b[K$prompt$shown")
           if back > 0 then print(s"\u001b[${back}D")
           java.lang.System.out.flush()
 
+        reading = true
         redraw()
         while result.isEmpty do
           val c = readByte()
@@ -117,6 +142,7 @@ object PlatformEditor:
               redraw()
             case _ => ()
         end while
+        reading = false
         result.getOrElse(Absent)
       }
     end edit

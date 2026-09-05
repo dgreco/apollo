@@ -78,13 +78,18 @@ Each is a real project, not a command — scope and build with tests where the
 architecture allows, and expect the concurrent-input work to need hands-on TTY
 validation.
 
-1. ~~Concurrent-input TUI layer~~ — **built (opt-in), JVM/JLine.**
+1. ~~Concurrent-input TUI layer~~ — **built (opt-in), both platforms.**
    `display.async_input: true` runs turns on a fiber with a persistent
    `readLine` and `LineEditor.printAbove` output; enables mid-turn `/steer`,
-   `/stop`, `/queue`. **Still needs hands-on TTY validation** (not headlessly
-   testable) and a **Native** concurrent-input implementation (currently
-   `printAbove` = plain println on Native, so async_input is JVM-only). Code:
-   `Repl.asyncLoop`/`runAsyncTurn`/`asyncCallbacks`; `LineEditor.printAbove`.
+   `/stop`, `/queue`. JVM uses JLine's `printAbove`; Native uses a hand-rolled
+   termios redraw (erase line → print → reprint prompt+buffer, cursor restored;
+   serialized with the edit loop via `ioLock`, shared line state via `@volatile`).
+   **Still needs hands-on TTY validation on BOTH platforms** (not headlessly
+   testable). On Native there's an unverified assumption that the blocking
+   `readByte` on the main fiber doesn't starve the turn fiber — the localhost
+   HTTP E2E tests passing on Native suggest concurrent fibers with blocking I/O
+   work, but confirm interactively. Code: `Repl.asyncLoop`/`runAsyncTurn`/
+   `asyncCallbacks`; `LineEditor.printAbove` (both `PlatformEditor`s).
 2. ~~Agent mock-transport seam~~ — **done** (the localhost-mock harness serves
    this; `AgentSteerSuite` uses it). Agent-side steer is built and tested.
 3. **REPL↔gateway IPC** — a control channel (socket/file) so `/handoff` can pass

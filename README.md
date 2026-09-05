@@ -125,9 +125,10 @@ in `config.yaml` to run each turn on a background fiber while the prompt stays
 live — so you can type **`/steer <message>`** to guide the model mid-turn,
 **`/stop`** to cancel, or **`/queue`**/plain messages to line up follow-ups,
 all *while the turn is still streaming*. Turn output is printed above the input
-line via JLine's `printAbove`. This mode is JVM/JLine only and its terminal
-behavior is best-effort — validate it on your terminal before relying on it.
-Default (off) keeps the standard synchronous REPL.
+line via `LineEditor.printAbove` (JLine on the JVM; a hand-rolled termios redraw
+on Scala Native). Its terminal behavior is **best-effort/experimental** —
+validate it on your terminal before relying on it. Default (off) keeps the
+standard synchronous REPL.
 
 ### One-shot and seeded runs
 
