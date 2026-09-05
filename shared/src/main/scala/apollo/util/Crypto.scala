@@ -12,6 +12,10 @@ object Crypto:
   def base64Url(bytes: Array[Byte]): String =
     java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
 
+  /** Standard base64 with padding (RFC 4648 §4) — for data: URLs / image blocks. */
+  def base64(bytes: Array[Byte]): String =
+    java.util.Base64.getEncoder.encodeToString(bytes)
+
   /** A high-entropy URL-safe token of at least `nBytes` bytes of randomness,
     * drawn from `UUID.randomUUID` (CSPRNG-backed and portable — Native's
     * `SecureRandom` support is uneven). Used for the PKCE `code_verifier`

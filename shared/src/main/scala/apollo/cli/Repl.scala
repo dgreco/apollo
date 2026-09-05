@@ -4,6 +4,7 @@ import apollo.agent.{Agent, SystemPrompt, TurnCallbacks, TurnResult}
 import apollo.core.*
 import apollo.config.Fs
 import apollo.cron.CronStore
+import apollo.util.Crypto
 import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
 import apollo.session.{SessionStore, SessionMeta}
@@ -37,6 +38,7 @@ final class Repl(
   private var showThinking = toolCtx.config.showReasoning
   private var toolProgress = toolCtx.config.toolProgress != "off"
   private var sess         = sessionId // tracks the active session (changes on /resume)
+  private var pendingImages = List.empty[Content.Image] // attached via /image, sent with the next turn
 
   def banner: String =
     val skillsLine = s"session ${Style.dim(sess)}"
@@ -79,7 +81,10 @@ final class Repl(
                   toolNames = tools
                 ))
       system  = if systemSuffix.isEmpty then base else s"$base\n\n$systemSuffix"
-      result <- agent.runTurn(Message.user(input), system, tools, callbacks)
+      userMsg = if pendingImages.isEmpty then Message.user(input)
+                else Message(Role.User, pendingImages.reverse :+ Content.Text(input), Absent)
+      _       = pendingImages = Nil // consumed
+      result <- agent.runTurn(userMsg, system, tools, callbacks)
       _      <- Console.printLine("")
       _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
@@ -232,6 +237,10 @@ final class Repl(
       case "stop" => doStop(arg)
       case "loop" | "proactive" => doLoopCmd(arg)
       case "review" => doReview(arg)
+      case "image" =>
+        if arg.isEmpty then Console.printLine("usage: /image <path>").andThen(true) else doImage(arg)
+      case "worktree" => doWorktree(arg)
+      case "snapshot" | "snap" => doSnapshot(arg)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
@@ -245,13 +254,77 @@ final class Repl(
     "Scan this repository and write or update an AGENTS.md at the repo root describing the project, " +
       "the build/test commands, the layout, and the conventions an agent should follow. Use your file tools."
 
-  private def doDiff(arg: String): Boolean < (Sync & Async) =
-    val g = if arg.isEmpty then "git diff" else s"git diff $arg"
-    Abort.run[CommandException](Command("sh", "-c", s"""cd "${toolCtx.cwd.toString}" && $g""").text).map {
-      case Result.Success(out) => Console.printLine(if out.trim.isEmpty then "(no changes)" else out)
-      case Result.Failure(e)   => Console.printLine(Style.red(s"git diff failed: ${e.getMessage}"))
-      case _                   => Console.printLine(Style.red("git diff failed"))
+  private def q(s: String): String = ReplCommands.shellQuote(s)
+
+  private def sh(cmd: String): Result[CommandException, String] < (Sync & Async) =
+    Abort.run[CommandException](Command("sh", "-c", cmd).text)
+
+  /** Run a git command in the working dir and print its output. */
+  private def runGit(gitCmd: String): Boolean < (Sync & Async) =
+    sh(s"cd ${q(toolCtx.cwd.toString)} && $gitCmd").map {
+      case Result.Success(out) => Console.printLine(if out.trim.isEmpty then "(ok)" else out)
+      case Result.Failure(e)   => Console.printLine(Style.red(s"git failed: ${e.getMessage}"))
+      case _                   => Console.printLine(Style.red("git failed"))
     }.andThen(true)
+
+  private def doDiff(arg: String): Boolean < (Sync & Async) =
+    runGit(if arg.isEmpty then "git diff" else s"git diff $arg")
+
+  private def doImage(pathStr: String): Boolean < (Sync & Async) =
+    ReplCommands.imageMediaType(pathStr) match
+      case None => Console.printLine(s"unsupported image type: $pathStr (png/jpg/gif/webp)").andThen(true)
+      case Some(mt) =>
+        val p = toolCtx.cwd.resolve(pathStr)
+        Fs.readBytes(p).map {
+          case Present(bytes) =>
+            pendingImages = Content.Image(mt, Crypto.base64(bytes)) :: pendingImages
+            Console.printLine(Style.dim(s"attached ${bytes.length} bytes ($mt) — sent with your next message"))
+          case Absent =>
+            Console.printLine(s"file not found: $p")
+        }.andThen(true)
+
+  private def doWorktree(arg: String): Boolean < (Sync & Async) =
+    ReplCommands.worktreeCommand(arg) match
+      case Some(cmd) => runGit(cmd)
+      case None      => Console.printLine("usage: /worktree [list | new [name] | prune [--dry-run]]").andThen(true)
+
+  private def doSnapshot(arg: String): Boolean < (Sync & Async) =
+    val stateDir = toolCtx.paths.home.resolve("scala-state")
+    val snapsDir = toolCtx.paths.home.resolve("snapshots")
+    arg.split("\\s+").toList.filter(_.nonEmpty) match
+      case Nil | ("list" :: _) =>
+        Fs.exists(snapsDir).map { ex =>
+          if !ex then Console.printLine("no snapshots")
+          else Fs.list(snapsDir).map { entries =>
+            val ids = entries.map(_.getFileName.toString).sorted
+            Console.printLine(if ids.isEmpty then "no snapshots" else ids.mkString("\n"))
+          }
+        }.andThen(true)
+      case "create" :: _ =>
+        Sync.defer(java.time.Instant.now().toEpochMilli.toString).map { id =>
+          val dest = snapsDir.resolve(id)
+          sh(s"mkdir -p ${q(dest.toString)} && cp -r ${q(stateDir.toString)}/. ${q(dest.toString)}/").map {
+            case Result.Success(_) => Console.printLine(s"snapshot created: $id")
+            case _                 => Console.printLine(Style.red("snapshot failed"))
+          }
+        }.andThen(true)
+      case "restore" :: id :: _ =>
+        val src = snapsDir.resolve(id)
+        Fs.exists(src).map { ex =>
+          if !ex then Console.printLine(s"no snapshot $id")
+          else sh(s"cp -r ${q(src.toString)}/. ${q(stateDir.toString)}/").map {
+            case Result.Success(_) =>
+              Console.printLine(Style.red(s"restored snapshot $id — restart apollo to reload session state"))
+            case _ => Console.printLine(Style.red("restore failed"))
+          }
+        }.andThen(true)
+      case "prune" :: _ =>
+        sh(s"rm -rf ${q(snapsDir.toString)}").map {
+          case Result.Success(_) => Console.printLine("removed all snapshots")
+          case _                 => Console.printLine(Style.red("prune failed"))
+        }.andThen(true)
+      case _ =>
+        Console.printLine("usage: /snapshot [create | list | restore <id> | prune]").andThen(true)
 
   private def doBranch(name: String): Boolean < (Sync & Async) =
     val hist = agent.history
@@ -356,6 +429,7 @@ final class Repl(
       |  /save [file.md]          write the transcript to Markdown (default <session>.md)
       |  /retry                   re-run the last user turn
       |  /copy                    copy the last reply to the clipboard
+      |  /image <path>            attach an image to your next message
       |  /sessions                list previous sessions
       |  /resume <id|latest>      resume a previous session
       |  /branch | /fork [name]   fork this session into a new one
@@ -368,6 +442,8 @@ final class Repl(
       |  /agents | /tasks         list background sessions
       |  /stop [id]               cancel a background session (all if no id)
       |  /review [focus]          independent subagent review of the conversation
+      |  /worktree [list|new [name]|prune]   manage git worktrees
+      |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |tools & services
       |  /tools                   list active tools
       |  /skills                  list available skills

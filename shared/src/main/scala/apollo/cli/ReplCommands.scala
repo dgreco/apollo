@@ -130,6 +130,26 @@ object ReplCommands:
     go(arg.split("\\s+").toList.filter(_.nonEmpty))
     (rest.mkString(" "), math.max(1, times), math.max(0, every))
 
+  /** Image media type from a file extension; None if unsupported. */
+  def imageMediaType(path: String): Option[String] =
+    val lower = path.toLowerCase
+    if lower.endsWith(".png") then Some("image/png")
+    else if lower.endsWith(".jpg") || lower.endsWith(".jpeg") then Some("image/jpeg")
+    else if lower.endsWith(".gif") then Some("image/gif")
+    else if lower.endsWith(".webp") then Some("image/webp")
+    else None
+
+  /** Single-quote a string for safe use inside `sh -c`. */
+  def shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
+
+  /** Map `/worktree` args to a git command; None → show usage. */
+  def worktreeCommand(arg: String): Option[String] =
+    arg.split("\\s+").toList.filter(_.nonEmpty) match
+      case Nil | ("list" :: _) => Some("git worktree list")
+      case "new" :: rest       => Some(s"git worktree add ${shellQuote(rest.headOption.getOrElse("apollo-worktree"))}")
+      case "prune" :: rest     => Some("git worktree prune" + (if rest.contains("--dry-run") then " -n" else ""))
+      case _                   => None
+
   /** Shell fragment that copies stdin/a file to the OS clipboard; None if the
     * OS is unknown. Composed into `sh -c "<cmd> < file"`.
     */

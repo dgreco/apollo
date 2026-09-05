@@ -121,6 +121,30 @@ class ReplCommandsSuite extends munit.FunSuite:
     assert(out.contains("b3") && out.contains("failed: nope"), out)
   }
 
+  test("imageMediaType by extension") {
+    assertEquals(ReplCommands.imageMediaType("a/b/pic.PNG"), Some("image/png"))
+    assertEquals(ReplCommands.imageMediaType("x.jpeg"), Some("image/jpeg"))
+    assertEquals(ReplCommands.imageMediaType("x.jpg"), Some("image/jpeg"))
+    assertEquals(ReplCommands.imageMediaType("x.gif"), Some("image/gif"))
+    assertEquals(ReplCommands.imageMediaType("x.webp"), Some("image/webp"))
+    assertEquals(ReplCommands.imageMediaType("x.txt"), None)
+  }
+
+  test("shellQuote escapes single quotes") {
+    assertEquals(ReplCommands.shellQuote("plain"), "'plain'")
+    assertEquals(ReplCommands.shellQuote("a'b"), "'a'\\''b'")
+  }
+
+  test("worktreeCommand maps args to git") {
+    assertEquals(ReplCommands.worktreeCommand(""), Some("git worktree list"))
+    assertEquals(ReplCommands.worktreeCommand("list"), Some("git worktree list"))
+    assertEquals(ReplCommands.worktreeCommand("new feature-x"), Some("git worktree add 'feature-x'"))
+    assertEquals(ReplCommands.worktreeCommand("new"), Some("git worktree add 'apollo-worktree'"))
+    assertEquals(ReplCommands.worktreeCommand("prune"), Some("git worktree prune"))
+    assertEquals(ReplCommands.worktreeCommand("prune --dry-run"), Some("git worktree prune -n"))
+    assertEquals(ReplCommands.worktreeCommand("bogus"), None)
+  }
+
   test("clipboardCommand per OS") {
     assertEquals(ReplCommands.clipboardCommand("Mac OS X"), Some("pbcopy"))
     assertEquals(ReplCommands.clipboardCommand("Windows 11"), Some("clip"))
