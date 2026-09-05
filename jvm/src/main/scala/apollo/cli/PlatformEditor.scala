@@ -49,6 +49,10 @@ object PlatformEditor:
       }
 
     def isInteractive: Boolean < Sync = Sync.defer(true)
+
+    // JLine's supported way to emit output above an active readLine (called from
+    // the turn fiber while the main fiber is blocked in readLine).
+    def printAbove(text: String): Unit < Sync = Sync.defer { reader.printAbove(text); () }
   end JLineEditor
 
   private object FallbackEditor extends LineEditor:
@@ -66,4 +70,5 @@ object PlatformEditor:
         catch case _: Throwable => false
       }
     def isInteractive: Boolean < Sync = Sync.defer(false)
+    def printAbove(text: String): Unit < Sync = Sync.defer(println(text))
 end PlatformEditor

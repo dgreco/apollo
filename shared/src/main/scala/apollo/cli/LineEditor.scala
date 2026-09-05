@@ -21,3 +21,10 @@ trait LineEditor:
   def onInterrupt(handler: () => Unit): Boolean < Sync
 
   def isInteractive: Boolean < Sync
+
+  /** Prints a line of output ABOVE the current input line without corrupting
+    * it — the primitive for concurrent-input mode (a turn streams output while
+    * the user types). JVM binds this to JLine's `LineReader.printAbove`; other
+    * editors fall back to a plain `println`.
+    */
+  def printAbove(text: String): Unit < Sync

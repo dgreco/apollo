@@ -40,8 +40,10 @@ final class Repl(
   private var sess         = sessionId // tracks the active session (changes on /resume)
   private var pendingImages = List.empty[Content.Image] // attached via /image, sent with the next turn
   private var goal: Maybe[String] = Absent              // /goal — standing objective injected each turn
-  private var queued        = List.empty[String]        // /queue — prompts to run after the next turn
+  private val queued        = new java.util.concurrent.ConcurrentLinkedQueue[String]() // /queue
   private var heartbeat: Maybe[Repl.Heartbeat] = Absent // /heartbeat — recurring prompt fired while idle
+  private var asyncEnabled  = false                      // display.async_input && interactive
+  private val turnRunning   = new java.util.concurrent.atomic.AtomicBoolean(false) // async mode
 
   def banner: String =
     val skillsLine = s"session ${Style.dim(sess)}"
@@ -49,11 +51,17 @@ final class Repl(
        |$skillsLine · ${toolNames.length} tools · /help for commands""".stripMargin
 
   def run: Unit < (Sync & Async) =
-    Console.printLine(banner).andThen(loop)
+    initAsync.andThen(Console.printLine(banner)).andThen(mainLoop)
 
   /** Runs one seeded turn (the `-q` flag on a TTY) then continues interactively. */
   def runSeeded(query: String): Unit < (Sync & Async) =
-    runTurn(query).andThen(loop)
+    initAsync.andThen(runTurn(query)).andThen(mainLoop)
+
+  private def initAsync: Unit < Sync =
+    editor.isInteractive.map(i => asyncEnabled = i && toolCtx.config.asyncInput)
+
+  private def mainLoop: Unit < (Sync & Async) =
+    if asyncEnabled then asyncLoop else loop
 
   private def promptStr: String = Style.gold("☀ ") + ""
 
@@ -85,11 +93,28 @@ final class Repl(
 
   /** Run any prompts stacked with /queue, in order, after a completed turn. */
   private def drainQueue: Unit < (Sync & Async) =
-    queued match
-      case Nil => Sync.defer(())
-      case next :: rest =>
-        queued = rest
-        Console.printLine(Style.dim(s"· queued: $next")).andThen(runTurn(next)).andThen(drainQueue)
+    val next = queued.poll()
+    if next == null then Sync.defer(())
+    else Console.printLine(Style.dim(s"· queued: $next")).andThen(runTurn(next)).andThen(drainQueue)
+
+  /** Build this turn's system prompt (goal + optional suffix folded in). */
+  private def buildSystem(tools: List[String], suffix: String): String < Sync =
+    SystemPrompt.build(SystemPrompt.Input(
+      config = toolCtx.config, paths = toolCtx.paths, skills = toolCtx.skills, cwd = toolCtx.cwd,
+      platform = "cli", model = runtime.model, provider = runtime.providerSlug, toolNames = tools
+    )).map { base =>
+      val withSuffix = if suffix.isEmpty then base else s"$base\n\n$suffix"
+      goal match
+        case Present(g) => s"$withSuffix\n\nStanding goal (keep working toward this across turns): $g"
+        case Absent     => withSuffix
+    }
+
+  /** Build the user message, attaching (and consuming) any /image attachments. */
+  private def buildUserMsg(input: String): Message =
+    val m = if pendingImages.isEmpty then Message.user(input)
+            else Message(Role.User, pendingImages.reverse :+ Content.Text(input), Absent)
+    pendingImages = Nil
+    m
 
   private def runTurn(
       input: String,
@@ -98,24 +123,8 @@ final class Repl(
   ): TurnResult < (Sync & Async) =
     for
       _      <- Sync.defer(editor.onInterrupt(() => interruptFlag.set(true)))
-      base   <- SystemPrompt.build(SystemPrompt.Input(
-                  config = toolCtx.config,
-                  paths = toolCtx.paths,
-                  skills = toolCtx.skills,
-                  cwd = toolCtx.cwd,
-                  platform = "cli",
-                  model = runtime.model,
-                  provider = runtime.providerSlug,
-                  toolNames = tools
-                ))
-      withSuffix = if systemSuffix.isEmpty then base else s"$base\n\n$systemSuffix"
-      system  = goal match
-                  case Present(g) => s"$withSuffix\n\nStanding goal (keep working toward this across turns): $g"
-                  case Absent     => withSuffix
-      userMsg = if pendingImages.isEmpty then Message.user(input)
-                else Message(Role.User, pendingImages.reverse :+ Content.Text(input), Absent)
-      _       = pendingImages = Nil // consumed
-      result <- agent.runTurn(userMsg, system, tools, callbacks)
+      system <- buildSystem(tools, systemSuffix)
+      result <- agent.runTurn(buildUserMsg(input), system, tools, callbacks)
       _      <- Console.printLine("")
       _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
@@ -136,6 +145,90 @@ final class Repl(
         else (),
       onStatus = msg => if toolProgress then Console.printLine(Style.dim(s"┊ $msg")) else ()
     )
+
+  // --- Concurrent-input mode (display.async_input) --------------------------
+  // A single persistent readLine stays active; each turn runs on a background
+  // fiber and streams output ABOVE the prompt via editor.printAbove. While a
+  // turn runs, typed lines are handled as /steer, /stop, /queue, or queued.
+
+  /** Callbacks that route a turn's output above the live input line, buffering
+    * text deltas into whole lines (printAbove is line-oriented). */
+  private def asyncCallbacks(buf: StringBuilder): TurnCallbacks =
+    TurnCallbacks(
+      onTextDelta = t => { buf.append(t); flushLines(buf) },
+      onThinkingDelta = t => if showThinking then { buf.append(Style.dim(t)); flushLines(buf) } else (),
+      onToolStart = (name, args) =>
+        if toolProgress then editor.printAbove(Style.dim(s"┊ $name ${args.take(120)}")) else (),
+      onToolComplete = (name, preview, isError) =>
+        if toolProgress && isError then editor.printAbove(Style.red(s"┊ $name failed: ${preview.take(160)}")) else (),
+      onStatus = msg => if toolProgress then editor.printAbove(Style.dim(s"┊ $msg")) else ()
+    )
+
+  private def flushLines(buf: StringBuilder): Unit < Sync =
+    val (lines, rem) = ReplCommands.takeCompleteLines(buf.toString)
+    buf.setLength(0)
+    buf.append(rem)
+    Kyo.foreachDiscard(lines)(editor.printAbove)
+
+  private def flushRemainder(buf: StringBuilder): Unit < Sync =
+    val s = buf.toString
+    buf.setLength(0)
+    if s.nonEmpty then editor.printAbove(s) else Sync.defer(())
+
+  private def asyncLoop: Unit < (Sync & Async) =
+    editor.readLine(promptStr).map {
+      case Absent => Console.printLine(Style.dim("bye"))
+      case Present(line) =>
+        val t = line.trim
+        if t.isEmpty then asyncLoop
+        else if turnRunning.get then handleDuringTurn(t).andThen(asyncLoop)
+        else if t.startsWith("/") then handleSlash(t).map(c => if c then asyncLoop else ())
+        else startTurnFiber(t).andThen(asyncLoop)
+    }
+
+  /** Lines typed while a turn is streaming: steer / stop / queue. */
+  private def handleDuringTurn(t: String): Unit < (Sync & Async) =
+    if t == "/stop" then
+      interruptFlag.set(true)
+      editor.printAbove(Style.dim("· stopping…"))
+    else if t.startsWith("/steer") then
+      val m = t.stripPrefix("/steer").trim
+      if m.isEmpty then editor.printAbove(Style.dim("usage: /steer <message>"))
+      else { agent.steer(m); editor.printAbove(Style.dim("· steer queued")) }
+    else if t.startsWith("/queue") then
+      val m = t.stripPrefix("/queue").trim
+      if m.isEmpty then editor.printAbove(Style.dim("usage: /queue <prompt>"))
+      else { queued.add(m); editor.printAbove(Style.dim(s"· queued (${queued.size})")) }
+    else
+      queued.add(t)
+      editor.printAbove(Style.dim("· queued (turn in progress) — /steer to guide, /stop to cancel"))
+
+  private def startTurnFiber(input: String): Unit < (Sync & Async) =
+    turnRunning.set(true)
+    runAsyncTurn(input)
+
+  /** Run one turn on a background fiber; on completion, drain the queue (chain
+    * the next queued turn) or clear the running flag. */
+  private def runAsyncTurn(input: String): Unit < (Sync & Async) =
+    val buf = new StringBuilder
+    buildSystem(toolNames, "").map { system =>
+      val work =
+        agent.runTurn(buildUserMsg(input), system, toolNames, asyncCallbacks(buf)).map { result =>
+          val note =
+            if result.interrupted then "· interrupted"
+            else if result.exitReason.startsWith("error") then s"· ${result.exitReason}"
+            else ""
+          flushRemainder(buf)
+            .andThen(if note.isEmpty then Sync.defer(()) else editor.printAbove(Style.dim(note)))
+            .andThen(onAsyncTurnComplete)
+        }
+      Fiber.initUnscoped(work).unit
+    }
+
+  private def onAsyncTurnComplete: Unit < (Sync & Async) =
+    val next = queued.poll()
+    if next == null then Sync.defer(turnRunning.set(false))
+    else editor.printAbove(Style.dim(s"· next queued: $next")).andThen(runAsyncTurn(next))
 
   /** Slash commands (the upstream in-session command set this build supports).
     * Returns false to exit the REPL.
@@ -461,16 +554,18 @@ final class Repl(
   private def doQueue(arg: String): Boolean < (Sync & Async) =
     arg.toLowerCase match
       case "" =>
+        import scala.jdk.CollectionConverters.*
+        val items = queued.asScala.toList
         Console.printLine(
-          if queued.isEmpty then "queue empty"
-          else queued.zipWithIndex.map((p, i) => s"${i + 1}. $p").mkString("\n")
+          if items.isEmpty then "queue empty"
+          else items.zipWithIndex.map((p, i) => s"${i + 1}. $p").mkString("\n")
         ).andThen(true)
       case "clear" =>
-        queued = Nil
+        queued.clear()
         Console.printLine("queue cleared").andThen(true)
       case _ =>
-        queued = queued :+ arg
-        Console.printLine(Style.dim(s"queued (${queued.length} pending) — runs after your next message")).andThen(true)
+        queued.add(arg)
+        Console.printLine(Style.dim(s"queued (${queued.size} pending) — runs after your next message")).andThen(true)
 
   // --- /heartbeat: recurring prompt fired while the REPL is idle -------------
 

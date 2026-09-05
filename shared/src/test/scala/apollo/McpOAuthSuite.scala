@@ -170,6 +170,7 @@ class McpOAuthSuite extends munit.FunSuite:
             def addHistory(line: String) = ()
             def onInterrupt(handler: () => Unit) = false
             def isInteractive = true
+            def printAbove(text: String) = Sync.defer(())
 
           val fixedCfg = cfg.copy(oauthRedirectPort = 0)
           // Play the browser: parse the real state from the auth URL login

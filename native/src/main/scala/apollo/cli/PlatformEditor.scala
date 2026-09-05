@@ -36,6 +36,7 @@ object PlatformEditor:
     def readSecret(prompt: String): Maybe[String] < (Sync & Async) = readLine(prompt)
     def onInterrupt(handler: () => Unit): Boolean < Sync           = Sync.defer(false)
     def isInteractive: Boolean < Sync                              = Sync.defer(false)
+    def printAbove(text: String): Unit < Sync                      = Sync.defer(println(text))
 
   private object RawEditor extends LineEditor:
 
@@ -50,6 +51,10 @@ object PlatformEditor:
     def onInterrupt(handler: () => Unit): Boolean < Sync = Sync.defer(false)
 
     def isInteractive: Boolean < Sync = Sync.defer(true)
+
+    // Native has no concurrent-input TUI yet; plain newline print (async_input
+    // mode is JVM-only in practice — see REPL_PARITY.md).
+    def printAbove(text: String): Unit < Sync = Sync.defer(println(text))
 
     private def edit(prompt: String, mask: Boolean): Maybe[String] =
       withRawMode {

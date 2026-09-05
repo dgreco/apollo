@@ -121,6 +121,14 @@ class ReplCommandsSuite extends munit.FunSuite:
     assert(out.contains("b3") && out.contains("failed: nope"), out)
   }
 
+  test("takeCompleteLines separates whole lines from the remainder") {
+    assertEquals(ReplCommands.takeCompleteLines("abc"), (Nil, "abc"))
+    assertEquals(ReplCommands.takeCompleteLines("a\nb\nc"), (List("a", "b"), "c"))
+    assertEquals(ReplCommands.takeCompleteLines("a\n"), (List("a"), ""))
+    assertEquals(ReplCommands.takeCompleteLines("a\n\nb"), (List("a", ""), "b"))
+    assertEquals(ReplCommands.takeCompleteLines(""), (Nil, ""))
+  }
+
   test("parseInterval accepts s/m/h and bare seconds") {
     assertEquals(ReplCommands.parseInterval("30s"), Some(30))
     assertEquals(ReplCommands.parseInterval("5m"), Some(300))

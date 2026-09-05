@@ -130,6 +130,14 @@ object ReplCommands:
     go(arg.split("\\s+").toList.filter(_.nonEmpty))
     (rest.mkString(" "), math.max(1, times), math.max(0, every))
 
+  /** Split accumulated stream text into complete lines (each terminated by a
+    * newline in the input) plus the trailing remainder. Used by async-input
+    * mode to feed whole lines to `printAbove` (which is line-oriented). */
+  def takeCompleteLines(s: String): (List[String], String) =
+    val idx = s.lastIndexOf('\n')
+    if idx < 0 then (Nil, s)
+    else (s.substring(0, idx).split("\n", -1).toList, s.substring(idx + 1))
+
   /** Parse a `/heartbeat` interval ("30s", "5m", "2h", or bare seconds) → seconds. */
   def parseInterval(s: String): Option[Int] =
     val t = s.trim.toLowerCase

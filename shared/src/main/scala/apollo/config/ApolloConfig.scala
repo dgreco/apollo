@@ -217,6 +217,9 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def displayStreaming: Boolean = at("display", "streaming").flatMap(_.bool).getOrElse(true)
   def showReasoning: Boolean    = at("display", "show_reasoning").flatMap(_.bool).getOrElse(false)
   def toolProgress: String      = strAt("display", "tool_progress").getOrElse("all")
+  /** Opt-in concurrent-input REPL (`display.async_input`): turns run on a fiber
+    * while the prompt stays live for /steer, /stop, /queue. JVM/JLine only. */
+  def asyncInput: Boolean       = at("display", "async_input").flatMap(_.bool).getOrElse(false)
 
   // --- toolsets -----------------------------------------------------------
 
