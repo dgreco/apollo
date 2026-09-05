@@ -39,10 +39,11 @@ workflow:
 .sbt:
   image: sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.7_6_1.11.3_3.7.1
   cache:
+    # GitLab allows at most 2 files in cache:key:files. build.sbt (library deps)
+    # and plugins.sbt (sbt plugins) are what meaningfully invalidate the caches.
     key:
       files:
         - build.sbt
-        - project/build.properties
         - project/plugins.sbt
     paths:
       - .cache/coursier/
