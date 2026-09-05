@@ -51,7 +51,7 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 
 | To… | You need |
 |---|---|
-| Build / run on the **JVM** | a recent JDK (developed on 26; 21+ recommended) and [sbt](https://www.scala-sbt.org/) 2.0.8 (`project/build.properties`; the repo pins Scala 3.9.0) |
+| Build / run on the **JVM** | **JDK 25 or newer** (kyo RC6's compile-time macros are built for Java 25; JDK 21 fails with `UnsupportedClassVersionError`) and [sbt](https://www.scala-sbt.org/) 2.0.8 (`project/build.properties`; the repo pins Scala 3.9.0) |
 | Build the **native** binary | the above, plus **OpenSSL 3.x** headers + libs at build *and* run time (Homebrew `openssl@3`, or the distro `-dev` package), and a C toolchain (Clang/LLVM) for Scala Native |
 | **Docker** terminal backend | a reachable Docker daemon + a running container |
 | **SSH** terminal backend | the `ssh` client on `PATH` and key-based access to the host |
