@@ -59,4 +59,37 @@ class ApprovalPolicySuite extends munit.FunSuite:
     val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = false, singleQuery = true)
     assert(run(svc.check("ls -la", NeverPromptUi)).isSuccess)
   }
+
+  /** A UI that always denies — proves the interactive prompt WAS reached. */
+  private object DenyingUi extends ToolUi:
+    def requestApproval(prompt: String): ApprovalDecision < (Sync & Async) = ApprovalDecision.Deny
+    def clarify(qs: List[ClarifyQuestion]): List[String] < (Sync & Async) = Nil
+
+  test("/yolo runtime toggle bypasses dangerous-command approval") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = false)
+    assert(!svc.yoloEnabled)
+    svc.setYolo(true)
+    assert(svc.yoloEnabled)
+    assert(run(svc.check(dangerous, NeverPromptUi)).isSuccess) // no prompt reached
+  }
+
+  test("/yolo can turn OFF a session started with --yolo") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = true)
+    assert(svc.yoloEnabled)
+    svc.setYolo(false)
+    assert(!svc.yoloEnabled)
+    // gating is active again → the prompt is reached and DenyingUi denies
+    assert(run(svc.check(dangerous, DenyingUi)).isFailure)
+  }
+
+  test("/approvals off bypasses; currentApprovalMode reflects the override") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = false)
+    assertEquals(svc.currentApprovalMode, "manual")
+    svc.setApprovalMode("off")
+    assertEquals(svc.currentApprovalMode, "off")
+    assert(run(svc.check(dangerous, NeverPromptUi)).isSuccess)
+  }
 end ApprovalPolicySuite

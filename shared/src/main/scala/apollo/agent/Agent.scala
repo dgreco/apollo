@@ -50,8 +50,25 @@ final class Agent(
   private var nudgeState       = Nudges.State()
   private var nudgeHydrated     = false
 
+  private var sid           = sessionId
+  private var forceCompress = false
+
   def history: List[Message]           = messages
   def restore(h: List[Message]): Unit  = messages = h
+
+  // --- REPL slash-command hooks -------------------------------------------
+  /** The session this agent is currently persisting to (changes on /resume). */
+  def currentSession: String = sid
+  /** Swap the active session (transcript + history) — used by `/resume`. */
+  def resumeSession(id: String, h: List[Message]): Unit =
+    sid = id
+    messages = h
+    nudgeHydrated = false // re-derive the nudge cadence from the restored history
+  /** Force a compaction before the next model call, bypassing the threshold. */
+  def requestCompress(): Unit    = forceCompress = true
+  def usageSnapshot: Usage       = totalUsage
+  def apiCallCount: Int          = apiCalls
+  def lastPromptTokenCount: Long = lastPromptTokens
 
   private def nudgeSettings(toolNames: List[String]): Nudges.Settings =
     Nudges.Settings(
@@ -83,7 +100,7 @@ final class Agent(
     val effectiveSystemPrompt = reminder match
       case Present(text) => s"$systemPrompt\n\n$text"
       case Absent        => systemPrompt
-    store.appendMessage(sessionId, userMessage).andThen {
+    store.appendMessage(sid, userMessage).andThen {
       loop(effectiveSystemPrompt, toolNames, callbacks, iterationsThisTurn = 0, graceUsed = false)
     }
 
@@ -131,7 +148,7 @@ final class Agent(
               // Durability invariant: the assistant message (tool calls
               // included) is persisted BEFORE any tool executes.
               messages = messages :+ response.message
-              store.appendMessage(sessionId, response.message).andThen {
+              store.appendMessage(sid, response.message).andThen {
                 if toolUses.isEmpty then
                   val text = response.message.content.collect { case Content.Text(t) => t }.mkString("\n")
                   finishTurn(text, "text_response", interrupted = false)
@@ -139,7 +156,7 @@ final class Agent(
                   runToolRound(toolUses, callbacks).map { results =>
                     val resultMsg = Message.toolResults(results)
                     messages = messages :+ resultMsg
-                    store.appendMessage(sessionId, resultMsg).andThen {
+                    store.appendMessage(sid, resultMsg).andThen {
                       loop(systemPrompt, toolNames, callbacks, iterationsThisTurn + 1, graceUsed || grace)
                     }
                   }
@@ -277,20 +294,26 @@ final class Agent(
     * user message.
     */
   private def maybeCompress(callbacks: TurnCallbacks): Unit < (Sync & Async) =
+    val forced        = forceCompress
+    forceCompress     = false // consumed once, whether or not we act on it
     val contextLength = runtime.contextLength.getOrElse(200_000)
     val threshold     = (config.compressionThreshold * contextLength).toLong
-    if !config.compressionEnabled || lastPromptTokens < threshold || messages.length < 8 then ()
+    val due           = config.compressionEnabled && lastPromptTokens >= threshold
+    // `/compress` (forced) overrides the threshold and the enabled flag, but we
+    // still need enough history for a summary to be worthwhile.
+    if messages.length < 8 || (!due && !forced) then ()
     else
-      callbacks.onStatus("context pressure: compressing history").andThen {
+      val reason = if forced && !due then "compressing history (requested)" else "context pressure: compressing history"
+      callbacks.onStatus(reason).andThen {
         val pruned = Compression.pruneOldToolResults(messages, config.protectLastN)
-        Compression.summarizeMiddle(pruned, config, runtime, sessionId, store).map { compressed =>
+        Compression.summarizeMiddle(pruned, config, runtime, sid, store).map { compressed =>
           messages = compressed
           lastPromptTokens = 0 // re-measured on the next response
         }
       }
 
   private def finishTurn(text: String, reason: String, interrupted: Boolean): TurnResult < (Sync & Async) =
-    store.updateMeta(sessionId)(m =>
+    store.updateMeta(sid)(m =>
       m.copy(messageCount = messages.length, apiCalls = apiCalls, usage = totalUsage)
     ).andThen(TurnResult(text, reason, apiCalls, totalUsage, interrupted))
 end Agent

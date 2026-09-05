@@ -109,8 +109,15 @@ apollo setup      # re-run the wizard any time
 apollo                       # start chatting
 ```
 
-REPL slash commands: `/help`, `/model`, `/reasoning`, `/reset`, `/new`,
-`/history`, `/tools`, `/skills`, `/verbose`, `/status`, `/quit`.
+REPL slash commands (type `/help` in-session for the full list):
+
+| | |
+|---|---|
+| **Session** | `/status` · `/history` (model, message count, token usage, context %), `/config`, `/reset` · `/new`, `/compress` · `/compact` (force compaction), `/save [file.md]`, `/retry`, `/copy`, `/sessions`, `/resume <id\|latest>` |
+| **Model** | `/model [name]`, `/reasoning <level>`, `/reasoning-display`, `/verbose`, `/version` · `/v` |
+| **Tools & services** | `/tools`, `/skills`, `/mcp` (server status + tools), `/cron` (scheduled jobs), `/memory` |
+| **Approvals** | `/yolo` (toggle bypass), `/approvals [manual\|off]` |
+| **Exit** | `/quit` · `/exit` · `/q` |
 
 ### One-shot and seeded runs
 

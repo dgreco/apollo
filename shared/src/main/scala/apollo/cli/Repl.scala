@@ -2,9 +2,12 @@ package apollo.cli
 
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
 import apollo.core.*
+import apollo.config.Fs
+import apollo.cron.CronStore
+import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
 import apollo.session.SessionStore
-import apollo.tools.{ToolContext, Toolsets}
+import apollo.tools.{ToolContext, Toolsets, ToolRegistry}
 import kyo.*
 
 /** ANSI styling helpers (degrade to plain text when NO_COLOR is set). */
@@ -33,9 +36,10 @@ final class Repl(
   private var runtime      = runtime0
   private var showThinking = toolCtx.config.showReasoning
   private var toolProgress = toolCtx.config.toolProgress != "off"
+  private var sess         = sessionId // tracks the active session (changes on /resume)
 
   def banner: String =
-    val skillsLine = s"session ${Style.dim(sessionId)}"
+    val skillsLine = s"session ${Style.dim(sess)}"
     s"""${Style.gold("☀ apollo")} — ${runtime.displayName} · ${Style.bold(runtime.model)}
        |$skillsLine · ${toolNames.length} tools · /help for commands""".stripMargin
 
@@ -102,21 +106,9 @@ final class Repl(
     name match
       case "quit" | "exit" | "q" => false
       case "help" =>
-        Console.printLine(
-          """/help                 this help
-            |/model [name]         show or switch the model (provider:model or bare id)
-            |/reasoning <level>    none|minimal|low|medium|high|xhigh|max
-            |/reset | /new         clear the conversation
-            |/compress             force context compression
-            |/history              show turn count and token usage
-            |/tools                list active tools
-            |/skills               list available skills
-            |/verbose              toggle tool progress display
-            |/reasoning-display    toggle thinking display
-            |/yolo                 toggle approval bypass for this session
-            |/status               session status
-            |/quit                 exit""".stripMargin
-        ).andThen(true)
+        Console.printLine(helpText).andThen(true)
+      case "version" | "v" =>
+        Console.printLine(s"apollo ${Cli.version} · ${runtime.displayName} ${runtime.model}").andThen(true)
       case "model" =>
         if arg.isEmpty then
           Console.printLine(s"model: ${runtime.model} (provider: ${runtime.providerSlug})").andThen(true)
@@ -133,10 +125,26 @@ final class Repl(
         agent.restore(Nil)
         Console.printLine("conversation cleared").andThen(true)
       case "history" | "status" =>
-        val h = agent.history
-        Console.printLine(
-          s"session $sessionId — ${h.length} messages, model ${runtime.model} (${runtime.providerSlug})"
+        Console.printLine(ReplCommands.statusLines(
+          sess, runtime.model, runtime.providerSlug,
+          agent.history.length, agent.apiCallCount, agent.usageSnapshot,
+          agent.lastPromptTokenCount, runtime.contextLength.getOrElse(200_000))
         ).andThen(true)
+      case "config" =>
+        val c = toolCtx.config
+        val pairs = List(
+          "model"            -> s"${runtime.model} (${runtime.providerSlug})",
+          "home"             -> toolCtx.paths.home.toString,
+          "profile"          -> ReplCommands.profileName(toolCtx.paths.home),
+          "approvals"        -> toolCtx.approvals.currentApprovalMode,
+          "yolo"             -> (if toolCtx.approvals.yoloEnabled then "on" else "off"),
+          "compression"      -> (if c.compressionEnabled then s"on (threshold ${c.compressionThreshold})" else "off"),
+          "context window"   -> runtime.contextLength.getOrElse(200_000).toString,
+          "memory"           -> (if c.memoryEnabled then "enabled" else "disabled"),
+          "terminal backend" -> c.terminalBackend,
+          "active tools"     -> toolNames.length.toString
+        )
+        Console.printLine(ReplCommands.formatKeyValues(pairs)).andThen(true)
       case "tools" =>
         Console.printLine(toolNames.sorted.mkString(", ")).andThen(true)
       case "skills" =>
@@ -146,19 +154,129 @@ final class Repl(
             Console.printLine(skills.sortBy(s => (s.category, s.name))
               .map(s => s"${s.category}/${s.name}: ${s.description}").mkString("\n"))
         }.andThen(true)
+      case "mcp" =>
+        Console.printLine(ReplCommands.formatMcp(McpManager.status, ToolRegistry.dynamicToolsets)).andThen(true)
+      case "cron" =>
+        new CronStore(toolCtx.paths).load.map(jobs => Console.printLine(ReplCommands.formatCron(jobs))).andThen(true)
+      case "memory" =>
+        Fs.readString(toolCtx.paths.memoryMd)
+          .map(mem => Console.printLine(mem.getOrElse("(no memory recorded)"))).andThen(true)
+      case "sessions" =>
+        store.list.map(metas => Console.printLine(ReplCommands.formatSessions(metas))).andThen(true)
+      case "resume" =>
+        if arg.isEmpty then Console.printLine("usage: /resume <id|title|latest>").andThen(true)
+        else doResume(arg)
+      case "save" => doSave(arg)
+      case "retry" => doRetry
+      case "copy"  => doCopy
       case "verbose" =>
         toolProgress = !toolProgress
         Console.printLine(s"tool progress: ${if toolProgress then "on" else "off"}").andThen(true)
       case "reasoning-display" =>
         showThinking = !showThinking
         Console.printLine(s"thinking display: ${if showThinking then "on" else "off"}").andThen(true)
-      case "compress" =>
-        Console.printLine("compression will run before the next model call").andThen(true)
+      case "compress" | "compact" =>
+        agent.requestCompress()
+        Console.printLine("compaction requested — runs before the next model call").andThen(true)
       case "yolo" =>
-        Console.printLine("yolo toggle is per-invocation in apollo: restart with --yolo").andThen(true)
+        val now = !toolCtx.approvals.yoloEnabled
+        toolCtx.approvals.setYolo(now)
+        Console.printLine(
+          if now then Style.red("yolo ON") + " — dangerous-command approvals bypassed"
+          else "yolo off"
+        ).andThen(true)
+      case "approvals" =>
+        arg.toLowerCase match
+          case "" =>
+            Console.printLine(s"approval mode: ${toolCtx.approvals.currentApprovalMode}" +
+              (if toolCtx.approvals.yoloEnabled then " (yolo on)" else "")).andThen(true)
+          case m @ ("manual" | "off") =>
+            toolCtx.approvals.setApprovalMode(m)
+            Console.printLine(s"approval mode: $m").andThen(true)
+          case _ =>
+            Console.printLine("usage: /approvals [manual|off]").andThen(true)
       case other =>
         Console.printLine(s"unknown command: /$other (try /help)").andThen(true)
   end handleSlash
+
+  private def helpText: String =
+    """commands
+      |  /help                  this help
+      |  /version | /v          show apollo + model version
+      |  /model [name]          show or switch the model (provider:model or bare id)
+      |  /reasoning <level>     none|minimal|low|medium|high|xhigh|max
+      |  /reasoning-display     toggle thinking display
+      |  /verbose               toggle tool-progress display
+      |session
+      |  /status | /history     model, message count, token usage, context %
+      |  /config                effective configuration summary
+      |  /reset | /new          clear the conversation
+      |  /compress | /compact   force context compaction before the next call
+      |  /save [file.md]        write the transcript to Markdown (default <session>.md)
+      |  /retry                 re-run the last user turn
+      |  /copy                  copy the last reply to the clipboard
+      |  /sessions              list previous sessions
+      |  /resume <id|latest>    resume a previous session
+      |tools & services
+      |  /tools                 list active tools
+      |  /skills                list available skills
+      |  /mcp                   MCP server status and tools
+      |  /cron                  list scheduled jobs
+      |  /memory                show recorded memory
+      |approvals
+      |  /yolo                  toggle dangerous-command approval bypass
+      |  /approvals [manual|off]  show or set the approval mode
+      |  /quit | /exit          exit""".stripMargin
+
+  private def doResume(target: String): Boolean < (Sync & Async) =
+    store.find(target).map {
+      case Present(meta) =>
+        store.loadTranscript(meta.id).map { msgs =>
+          agent.resumeSession(meta.id, msgs)
+          sess = meta.id
+          Console.printLine(s"resumed ${meta.id} — ${msgs.length} messages")
+        }
+      case Absent =>
+        Console.printLine(s"no session matching '$target'")
+    }.andThen(true)
+
+  private def doSave(arg: String): Boolean < (Sync & Async) =
+    val fileName = if arg.nonEmpty then arg else s"$sess.md"
+    val path     = toolCtx.cwd.resolve(fileName)
+    val md       = ReplCommands.toMarkdown(sess, agent.history)
+    Fs.writeString(path, md)
+      .andThen(Console.printLine(s"saved ${agent.history.length} messages to $path"))
+      .andThen(true)
+
+  private def doRetry: Boolean < (Sync & Async) =
+    val h   = agent.history
+    val idx = h.lastIndexWhere(_.role == Role.User)
+    if idx < 0 then Console.printLine("nothing to retry").andThen(true)
+    else
+      val trimmed = h.take(idx)
+      val text    = ReplCommands.messageText(h(idx))
+      agent.restore(trimmed)
+      store.rewriteTranscript(sess, trimmed).andThen(runTurn(text)).andThen(true)
+
+  private def doCopy: Boolean < (Sync & Async) =
+    val text = agent.history.reverse.collectFirst {
+      case m if m.role == Role.Assistant => ReplCommands.messageText(m)
+    }.getOrElse("")
+    if text.isEmpty then Console.printLine("nothing to copy").andThen(true)
+    else
+      ReplCommands.clipboardCommand(java.lang.System.getProperty("os.name", "")) match
+        case None => Console.printLine("clipboard not supported on this OS").andThen(true)
+        case Some(clip) =>
+          val tmp = toolCtx.paths.home.resolve(".apollo-clip")
+          Fs.writeString(tmp, text).andThen {
+            Abort.run[CommandException](Command("sh", "-c", s"""$clip < "${tmp.toString}"""").text).map { res =>
+              Fs.delete(tmp).andThen {
+                res match
+                  case Result.Success(_) => Console.printLine(Style.dim(s"copied ${text.length} chars to clipboard"))
+                  case _                 => Console.printLine(Style.red("clipboard copy failed (is a clipboard tool installed?)"))
+              }
+            }
+          }.andThen(true)
 
   private def switchModel(spec: String): Unit < (Sync & Async) =
     // provider:model selector (upstream parse_model_input); bare id keeps provider.

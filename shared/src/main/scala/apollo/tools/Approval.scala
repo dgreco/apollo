@@ -20,8 +20,24 @@ final class ApprovalService(
 ):
   private val sessionApproved = new java.util.concurrent.ConcurrentHashMap[String, Boolean]()
 
+  // Runtime overrides settable from the REPL (`/yolo`, `/approvals`). When
+  // Present they win over the startup flag / config for the rest of the session.
+  @volatile private var yoloOverride: Maybe[Boolean] = Absent
+  @volatile private var modeOverride: Maybe[String]  = Absent
+
   private def yolo: Boolean =
-    yoloFlag || config.env.getBool("APOLLO_YOLO_MODE").getOrElse(false)
+    yoloOverride match
+      case Present(v) => v
+      case Absent     => yoloFlag || config.env.getBool("APOLLO_YOLO_MODE").getOrElse(false)
+
+  private def effectiveMode: String = modeOverride.getOrElse(config.approvalMode)
+
+  /** Toggle YOLO (approval bypass) for the running session. */
+  def setYolo(on: Boolean): Unit = yoloOverride = Present(on)
+  def yoloEnabled: Boolean       = yolo
+  /** Set the approval mode ("manual" | "off") for the running session. */
+  def setApprovalMode(mode: String): Unit = modeOverride = Present(mode)
+  def currentApprovalMode: String         = effectiveMode
 
   private val unattendedPlatforms = Set("webhook", "api_server", "msgraph_webhook")
 
@@ -36,7 +52,7 @@ final class ApprovalService(
         case Present(glob) =>
           Result.fail(s"command blocked by approvals.deny pattern '$glob'. Do not retry it.")
         case Absent =>
-          if yolo || config.approvalMode == "off" then Result.succeed(())
+          if yolo || effectiveMode == "off" then Result.succeed(())
           else if !Detection.isDangerous(command) then Result.succeed(())
           else checkDangerous(command, ui)
 
