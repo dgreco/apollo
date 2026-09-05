@@ -189,7 +189,7 @@ C4Component
   Rel(agent, registry, "definitions / dispatch")
   Rel(registry, toolsets, "resolve selection")
   Rel(builtins, approval, "terminal → check")
-  Rel(mgr, registry, "registerDynamic(mcp-<srv>)")
+  Rel(mgr, registry, "registerDynamic mcp-NAME toolset")
   Rel(registry, handle, "MCP tool call → request")
   Rel(handle, conn, "request (guarded)")
   Rel(conn, mcpx, "JSON-RPC")
