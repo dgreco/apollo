@@ -74,16 +74,18 @@ object PlatformEditor:
 
     override def terminalWidth: Int < Sync = Sync.defer(queryWidth())
 
-    /** Terminal columns via TIOCGWINSZ on stdout; falls back to $COLUMNS, then 0. */
+    /** Terminal columns via TIOCGWINSZ on stdout — tries both the macOS
+      * (0x40087468) and Linux (0x5413) request numbers so it works without
+      * OS detection; falls back to $COLUMNS, then 0. */
     private def queryWidth(): Int =
       try
-        val isMac = Option(java.lang.System.getProperty("os.name")).exists(_.toLowerCase.contains("mac"))
-        val req: Size = (if isMac then 0x40087468L else 0x5413L).toSize
-        val ws = stackalloc[CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]]()
-        if scala.scalanative.posix.sys.ioctl.ioctl(1, req, ws.asInstanceOf[Ptr[Byte]]) == 0 then
-          val cols = (!ws)._2.toInt
-          if cols > 0 then cols else colsEnv
-        else colsEnv
+        def viaIoctl(req: Long): Int =
+          val ws = stackalloc[CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]]()
+          if scala.scalanative.posix.sys.ioctl.ioctl(1, req.toSize, ws.asInstanceOf[Ptr[Byte]]) == 0 then
+            (!ws)._2.toInt
+          else 0
+        val cols = { val m = viaIoctl(0x40087468L); if m > 0 then m else viaIoctl(0x5413L) }
+        if cols > 0 then cols else colsEnv
       catch case _: Throwable => colsEnv
 
     private def colsEnv: Int =

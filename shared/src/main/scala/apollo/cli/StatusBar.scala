@@ -48,10 +48,12 @@ object StatusBar:
     * model gold and the rest dim. */
   def bar(width: Int, model: String, ctxTokens: Long, ctxWindow: Int,
           inTok: Long, outTok: Long, turnMs: Long, title: String, colored: Boolean = true): String =
-    def gold(s: String) = if colored then Style.gold(s) else s
-    def dim(s: String)  = if colored then Style.dim(s) else s
+    // Truecolor to match the welcome banner (gold #FFD700 / dim gold #B8860B).
+    def gold(s: String) = if colored then s"\u001b[1;38;2;255;215;0m$s\u001b[0m" else s
+    def dim(s: String)  = if colored then s"\u001b[38;2;184;134;11m$s\u001b[0m" else s
+    val m = model.split("/").last // short model, like the banner
     val segs = scala.collection.mutable.ListBuffer[String]()
-    segs += gold(s"‡ $model")
+    segs += gold(s"‡ $m")
     if ctxWindow > 0 then
       val pct = ctxTokens * 100L / ctxWindow.toLong
       segs += dim(s"${human(ctxTokens)}/${human(ctxWindow.toLong)}")
