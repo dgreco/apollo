@@ -1,7 +1,8 @@
 package apollo.cli
 
 import kyo.*
-import org.jline.reader.{Candidate, Completer, EndOfFileException, LineReader, LineReaderBuilder, ParsedLine, UserInterruptException}
+import org.jline.keymap.KeyMap
+import org.jline.reader.{Candidate, Completer, EndOfFileException, LineReader, LineReaderBuilder, ParsedLine, Reference, UserInterruptException, Widget}
 import org.jline.terminal.{Terminal, TerminalBuilder}
 
 /** JVM line editor: JLine 3/4 — its default emacs keymap already provides
@@ -26,9 +27,27 @@ object PlatformEditor:
           reader.setOpt(LineReader.Option.AUTO_LIST)
           reader.setOpt(LineReader.Option.LIST_PACKED)
           reader.unsetOpt(LineReader.Option.INSERT_TAB)
+          bindPalette(reader)
           new JLineEditor(terminal, reader)
         catch case _: Exception => FallbackEditor
     }
+
+  /** Binds Ctrl-P to a command palette: on an empty line insert `/` so the full
+    * command list shows, then trigger completion (JLine lists candidates via
+    * AUTO_LIST). Overrides JLine's default Ctrl-P (previous-history). Best-effort
+    * — a binding failure leaves the editor otherwise fully working. */
+  private def bindPalette(reader: LineReader): Unit =
+    try
+      reader.getWidgets().put("apollo-palette", new Widget:
+        def apply(): Boolean =
+          val buf = reader.getBuffer()
+          if buf.length() == 0 then buf.write("/")
+          reader.callWidget(LineReader.COMPLETE_WORD)
+          true
+      )
+      reader.getKeyMaps().get(LineReader.MAIN)
+        .bind(new Reference("apollo-palette"), KeyMap.ctrl('P'))
+    catch case _: Throwable => ()
 
   /** Completes the REPL slash commands from the shared catalog. Offered only
     * while the line is a bare command token (starts with `/`, no space yet);
