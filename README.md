@@ -8,7 +8,7 @@ native binary, no runtime dependencies beyond a TLS library).
 It is a *terminal-first AI agent*: you give it a task, it plans, calls tools
 (files, shell, web, MCP servers, subagents), and works until the task is done —
 in an interactive REPL, as a one-shot command, or as a long-running **gateway**
-that answers on Telegram, Discord, Slack, Matrix, WhatsApp, and SMS. It talks to any of ~40 model
+that answers on Telegram, Discord, Slack, Matrix, WhatsApp, SMS, Teams, and iMessage. It talks to any of ~40 model
 providers over four wire protocols, and it reads its configuration the *same way*
 Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 `config.yaml` / `.env` copied in works unchanged.
@@ -37,7 +37,7 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 - **MCP client** — stdio and streamable-HTTP transports, OAuth 2.1 + PKCE, a
   reliability ladder (circuit breaker / keepalive / reconnect / parking), and
   `apollo mcp add|remove|list|test|login|reauth|logout`.
-- **Gateway** — one process hosting Telegram, Discord, Slack, Matrix, WhatsApp, SMS, an
+- **Gateway** — one process hosting Telegram, Discord, Slack, Matrix, WhatsApp, SMS, Teams, iMessage, an
   OpenAI-compatible HTTP API, a generic webhook, and a cron scheduler, with
   optional live-streaming replies.
 - **Agent core** — role-alternation repair, persist-before-execute durability,

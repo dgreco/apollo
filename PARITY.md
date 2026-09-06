@@ -64,12 +64,13 @@ into a platform. Roughly ordered by value/effort.
 - ~~**Skills Hub**~~ **done (install/search)** — `apollo skills install <git-url|owner/repo|dir>`
   (git clone / local copy) and `apollo skills search <q>` over a catalog
   (`skills.hub_catalog_url`). Ledger/linter/curate still open.
-- **More gateway platforms** — **Matrix, WhatsApp Cloud, and SMS (Twilio) done**,
-  alongside Telegram/Discord/Slack. Matrix is HTTP `/sync` long-poll + send;
-  WhatsApp Cloud (WHATSAPP_TOKEN + WHATSAPP_VERIFY_TOKEN) and Twilio SMS
-  (TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM_NUMBER) are inbound-webhook servers that
-  ACK immediately and reply out-of-band via the Graph / Twilio REST APIs. Email
-  (IMAP/SMTP), Teams, iMessage remain (non-HTTP or vendor-SDK, out of fit).
+- **More gateway platforms** — **Matrix, WhatsApp Cloud, Twilio SMS, MS Teams,
+  and iMessage done**, alongside Telegram/Discord/Slack. Matrix is HTTP `/sync`
+  long-poll + send; WhatsApp Cloud, Twilio SMS, and Teams (Bot Framework, with an
+  Azure-AD client-credentials bearer) are inbound-webhook servers that ACK
+  immediately and reply out-of-band via REST; iMessage (macOS, `IMESSAGE_ENABLED`)
+  polls the Messages `chat.db` via `sqlite3` and sends via `osascript`. Email is
+  the remaining one — see below (now done via kyo-net TLS sockets).
 
 ## Group C — out of apollo's scope (platform, not core agent)
 
