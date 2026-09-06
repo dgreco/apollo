@@ -103,6 +103,56 @@ object Transport:
       }
     }
 
+  private val binaryReqRoute = HttpRoute.postRaw("").request(_.bodyBinary).response(_.bodyText)
+
+  /** POSTs a JSON string body and returns the raw response bytes (e.g. TTS
+    * audio). Non-2xx surfaces as `ProviderError.Http` with the body text. */
+  def postJsonToBytes(
+      url: String,
+      headers: List[(String, String)],
+      body: String,
+      timeout: Duration = turnTimeout
+  ): Array[Byte] < (Sync & Async & Abort[ProviderError]) =
+    withRequest(url, baseHeaders ++ headers, body) { req =>
+      liftResult {
+        HttpClient.withConfig(_.timeout(timeout)) {
+          HttpClient.use { client =>
+            client.sendWith(streamRoute, req) { resp =>
+              collectBytes(resp.fields.body).map { bytes =>
+                if resp.status.isSuccess then Result.succeed(bytes)
+                else Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+              }
+            }
+          }
+        }
+      }
+    }
+
+  /** POSTs a raw binary body (e.g. a multipart/form-data upload) and returns the
+    * response text. The caller sets `content-type`. */
+  def postBinary(
+      url: String,
+      headers: List[(String, String)],
+      body: Array[Byte],
+      timeout: Duration = turnTimeout
+  ): String < (Sync & Async & Abort[ProviderError]) =
+    HttpRequest.postRaw(url) match
+      case Result.Success(base) =>
+        val req = (baseHeaders.filterNot(_._1 == "content-type") ++ headers)
+          .foldLeft(base)((r, h) => r.setHeader(h._1, h._2)).addField("body", Span.from(body))
+        liftResult {
+          HttpClient.withConfig(_.timeout(timeout)) {
+            HttpClient.use { client =>
+              client.sendWith(binaryReqRoute, req) { resp =>
+                val text = resp.fields.body
+                if resp.status.isSuccess then Result.succeed(text)
+                else Result.fail(ProviderError.Http(resp.status.code, text))
+              }
+            }
+          }
+        }
+      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+
   /** POSTs `body`, returns the full response text. */
   def postJson(
       url: String,

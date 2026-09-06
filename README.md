@@ -32,8 +32,9 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
   sandbox-CLI backend), `todo_list`, `memory`, `skills_*`, `clarify`,
   `session_search`, `delegate_task` (real subagents), `cronjob_manage`,
   `web_search` / `web_extract`, `vision_analyze`, `image_generate`,
-  `execute_code`, `tool_search`, `browser` (headless Chrome over CDP), plus
-  every tool exported by connected **MCP servers**.
+  `video_generate`, `execute_code`, `tool_search`, `browser` (headless Chrome
+  over CDP), `text_to_speech` / `transcribe`, plus every tool exported by
+  connected **MCP servers**.
 - **MCP client** — stdio and streamable-HTTP transports, OAuth 2.1 + PKCE, a
   reliability ladder (circuit breaker / keepalive / reconnect / parking), and
   `apollo mcp add|remove|list|test|login|reauth|logout`.

@@ -294,6 +294,27 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def videoMaxPolls: Int =
     at("video", "max_polls").flatMap(_.int).getOrElse(120).max(1)
 
+  // Text-to-speech (`tts.*`), used by the text_to_speech tool. provider =
+  // openai (HTTP /audio/speech), say (macOS `say`), or command.
+  def ttsProvider: String =
+    strAt("tts", "provider").orElse(env.get("TTS_PROVIDER")).getOrElse(if ttsApiKey.nonEmpty then "openai" else "say")
+  def ttsApiKey: Maybe[String] =
+    strAt("tts", "api_key").orElse(env.get("TTS_API_KEY")).orElse(env.get("OPENAI_API_KEY"))
+  def ttsApiBase: String =
+    strAt("tts", "api_base").orElse(env.get("TTS_API_BASE")).getOrElse("https://api.openai.com/v1")
+  def ttsModel: String  = strAt("tts", "model").orElse(env.get("TTS_MODEL")).getOrElse("tts-1")
+  def ttsVoice: String  = strAt("tts", "voice").orElse(env.get("TTS_VOICE")).getOrElse("alloy")
+  def ttsFormat: String = strAt("tts", "format").getOrElse("mp3")
+  def ttsCommand: Maybe[String] = strAt("tts", "command")
+
+  // Speech-to-text (`stt.*`), used by the transcribe tool (OpenAI-compatible
+  // /audio/transcriptions multipart upload).
+  def sttApiKey: Maybe[String] =
+    strAt("stt", "api_key").orElse(env.get("STT_API_KEY")).orElse(env.get("OPENAI_API_KEY"))
+  def sttApiBase: String =
+    strAt("stt", "api_base").orElse(env.get("STT_API_BASE")).getOrElse("https://api.openai.com/v1")
+  def sttModel: String = strAt("stt", "model").orElse(env.get("STT_MODEL")).getOrElse("whisper-1")
+
   // --- toolsets -----------------------------------------------------------
 
   def platformToolsets(platform: String): Maybe[List[String]] =
