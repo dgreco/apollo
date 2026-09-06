@@ -86,14 +86,24 @@ pursued unless apollo's remit changes from "core agent" to "platform".
 
 ---
 
-## Group A status
+## Group A & B status
 
-**All Group-A items are now built** (each CI-green, JVM + Native): `vision_analyze`,
-Bedrock ConverseStream streaming, `execute_code`, `tool_search`, MCP
-sampling/elicitation (stdio), and Copilot OAuth. Remaining follow-ups noted inline
-above: MCP HTTP server-requests + server mode + legacy SSE; the other OAuth
-providers; and Bedrock/Copilot live validation. Group B and Group C are unchanged
-(breadth / out-of-scope).
+**All Group-A items and their follow-ups are built** (each CI-green, JVM + Native):
+`vision_analyze`, Bedrock ConverseStream streaming, `execute_code`, `tool_search`,
+MCP sampling/elicitation (**stdio + streamable-HTTP**), provider OAuth (**Copilot +
+Qwen**, plus Vertex/Azure via `model.key_cmd`), the **guards** (repetition /
+empty-response / prompt-cache), **background auto-review**, and **more terminal
+backends** (singularity + generic `exec`).
+
+**Group B (breadth) is built too**: `image_generate`, Skills Hub, **browser
+automation** (CDP over WebSocket), and gateway platforms **Matrix, WhatsApp Cloud,
+and Twilio SMS**.
+
+Still open (deliberately, or larger): MCP **server mode** + legacy HTTP+SSE
+transport; OAuth for **ChatGPT/Codex** (loopback-PKCE broker), **xAI**, native
+Gemini, MoA; email (IMAP/SMTP) / Teams / iMessage gateways; video generation; and
+live validation of the reverse-engineered Copilot/Qwen and Bedrock-stream flows.
+Group C stays out of scope (platform, not core agent).
 
 ## Method / reproducing this audit
 
