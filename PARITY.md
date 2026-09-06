@@ -78,18 +78,36 @@ into a platform. Roughly ordered by value/effort.
   support — it degrades to a clear "JVM-only" error (a platform gap alongside the
   line editor / session-search backend).
 
-## Group C — out of apollo's scope (platform, not core agent)
+## Group C — platform features
 
-Plugins ecosystem · Electron desktop app + web dashboard + TUI · ACP editor
-integration (VS Code/Zed/JetBrains) · LSP · computer-use · voice/wake/TTS/
-transcription · billing/credits/pricing · egress proxy / credential firewall ·
-kanban / hosted rooms / multi-agent collab · learning-journey / pets /
-achievements · suggestion / blueprint engine · observability (OTLP) · secrets
-managers (1Password/Bitwarden) · checkpoints / git-safety · context engine ·
-enterprise connectors (Feishu, MS Graph, Spotify, Home Assistant, X search).
+Several Group-C items have since been **pulled into apollo** (mirroring Hermes's
+design, each CI-green JVM + Native unless noted):
 
-These would each require building a whole subsystem; they are deliberately **not**
-pursued unless apollo's remit changes from "core agent" to "platform".
+- ~~**ACP editor integration**~~ — `apollo acp`, a JSON-RPC/stdio Agent Client
+  Protocol server (Zed/VS Code/JetBrains); streams `session/update` chunks.
+- ~~**LSP**~~ — an LSP *client*: `lsp` tool + `apollo lsp list` spawn language
+  servers (pyright/gopls/rust-analyzer/…) and surface diagnostics.
+- ~~**voice / TTS / transcription**~~ — `text_to_speech` + `transcribe` tools
+  (OpenAI-compatible audio APIs / macOS `say`). Wake-word is **not** done (needs
+  a cross-platform audio-capture + ONNX pipeline apollo has no path to).
+- ~~**computer-use**~~ — `computer_use` tool (screenshot/click/type via macOS
+  `screencapture`/`cliclick`; Hermes's cua-driver substituted natively).
+- ~~**observability (OTLP)**~~ — content-free OTLP/HTTP turn+tool traces;
+  `apollo monitoring status`.
+- ~~**secrets managers**~~ — 1Password (`op`), Bitwarden (`bws`), command sources
+  resolved into the env at startup; `apollo secrets`.
+- ~~**checkpoints / git-safety**~~ — automatic pre-edit shadow-ref checkpoints
+  (`checkpoints.enabled`) + manual `/rollback`.
+- ~~**kanban**~~ — now agent-facing (`kanban` tool) over the shared local board.
+
+Still out of scope (a whole subsystem each, or off apollo's terminal-first,
+dependency-light remit): plugins ecosystem · Electron desktop app + web
+dashboard + GUI TUI · billing/credits/pricing · egress proxy / credential
+firewall · hosted rooms / multi-agent collab · learning-journey / pets /
+achievements · suggestion / blueprint engine · context engine · wake-word /
+always-listening · enterprise connectors (Feishu, MS Graph, Spotify, Home
+Assistant, X search). These are **not** pursued unless apollo's remit changes
+from "core agent" to "platform".
 
 ---
 
