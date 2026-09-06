@@ -209,6 +209,9 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
     at("skills", "disabled").flatMap(_.strings).getOrElse(Nil)
   def skillCreationNudgeInterval: Int =
     at("skills", "creation_nudge_interval").flatMap(_.int).getOrElse(15)
+  /** Skills Hub catalog (a JSON index of installable skills) for `apollo skills search`. */
+  def skillsHubCatalogUrl: Maybe[String] =
+    strAt("skills", "hub_catalog_url").orElse(env.get("SKILLS_HUB_CATALOG_URL"))
 
   // --- display ------------------------------------------------------------
 

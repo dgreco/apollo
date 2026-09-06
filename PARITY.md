@@ -56,7 +56,9 @@ into a platform. Roughly ordered by value/effort.
   hitting an OpenAI-compatible `/images/generations` endpoint (`image.*` config),
   saving the PNG. Video generation still open (niche/heavy).
 - **Browser automation** (multiple backends in Hermes).
-- **Skills Hub** — remote skill install/search/curate, ledger, linter.
+- ~~**Skills Hub**~~ **done (install/search)** — `apollo skills install <git-url|owner/repo|dir>`
+  (git clone / local copy) and `apollo skills search <q>` over a catalog
+  (`skills.hub_catalog_url`). Ledger/linter/curate still open.
 - **More gateway platforms** — email, SMS, Matrix, WhatsApp, Teams, iMessage, …
   (Hermes has ~25).
 

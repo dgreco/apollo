@@ -65,7 +65,7 @@ object Cli:
       case "model"    => Commands.model(args, config)
       case "config"   => Commands.config(args, config, paths)
       case "sessions" => Commands.sessions(args, paths)
-      case "skills"   => Commands.skills(config, paths)
+      case "skills"   => Commands.skills(args, config, paths)
       case "cron"     => Commands.cron(args, config, paths)
       case "setup"    => SetupWizard.run(config, paths)
       case "status" | "doctor" => Commands.status(config, paths)

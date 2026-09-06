@@ -65,7 +65,27 @@ object Commands:
         Console.printLine(rows.mkString("\n"))
     }
 
-  def skills(config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+  def skills(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    args.commandArgs match
+      case "search" :: rest =>
+        val query = rest.mkString(" ")
+        if query.isEmpty then Console.printLine("usage: apollo skills search <query>")
+        else apollo.skills.SkillsHub.search(config, query).map {
+          case Result.Failure(err) => Console.printLine(Style.red(err))
+          case Result.Success(Nil) => Console.printLine(s"no catalog skills match '$query'")
+          case Result.Success(hits) =>
+            Console.printLine(hits.map(e => s"${e.name}: ${e.description}\n    ${e.source}").mkString("\n"))
+        }
+      case "install" :: source :: _ =>
+        apollo.skills.SkillsHub.install(paths, source).map {
+          case Result.Failure(err)   => Console.printLine(Style.red(s"install failed: $err"))
+          case Result.Success(names) => Console.printLine(s"installed: ${names.mkString(", ")} (into ${paths.skillsDir})")
+        }
+      case "install" :: Nil =>
+        Console.printLine("usage: apollo skills install <git-url | owner/repo | local-dir>")
+      case _ => listSkills(config, paths)
+
+  private def listSkills(config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
     new SkillStore(config, paths).scan.map { skills =>
       if skills.isEmpty then
         Console.printLine(s"no skills installed (drop agentskills.io-format dirs under ${paths.skillsDir})")
