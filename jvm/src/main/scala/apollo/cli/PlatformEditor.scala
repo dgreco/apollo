@@ -1,7 +1,7 @@
 package apollo.cli
 
 import kyo.*
-import org.jline.reader.{EndOfFileException, LineReader, LineReaderBuilder, UserInterruptException}
+import org.jline.reader.{Candidate, Completer, EndOfFileException, LineReader, LineReaderBuilder, ParsedLine, UserInterruptException}
 import org.jline.terminal.{Terminal, TerminalBuilder}
 
 /** JVM line editor: JLine 3/4 — its default emacs keymap already provides
@@ -17,10 +17,37 @@ object PlatformEditor:
       else
         try
           val terminal = TerminalBuilder.builder().system(true).build()
-          val reader   = LineReaderBuilder.builder().terminal(terminal).build()
+          val reader   = LineReaderBuilder.builder()
+                           .terminal(terminal)
+                           .completer(SlashCompleter)
+                           .build()
+          // Auto-list candidates (no double-TAB), keep them compact, and don't
+          // let TAB insert a literal tab so `/` + TAB always lists commands.
+          reader.setOpt(LineReader.Option.AUTO_LIST)
+          reader.setOpt(LineReader.Option.LIST_PACKED)
+          reader.unsetOpt(LineReader.Option.INSERT_TAB)
           new JLineEditor(terminal, reader)
         catch case _: Exception => FallbackEditor
     }
+
+  /** Completes the REPL slash commands from the shared catalog. Offered only
+    * while the line is a bare command token (starts with `/`, no space yet);
+    * JLine filters the candidates against what's typed, narrowing per keystroke
+    * of TAB. Each candidate shows its category group and one-line summary. */
+  private object SlashCompleter extends Completer:
+    def complete(reader: LineReader, line: ParsedLine, candidates: java.util.List[Candidate]): Unit =
+      val buf = line.line
+      if buf.startsWith("/") && !buf.trim.contains(' ') then
+        ReplCommands.commandCatalog.foreach { c =>
+          c.names.foreach { n =>
+            candidates.add(new Candidate(
+              "/" + n,           // value inserted
+              "/" + n,           // display
+              c.category,        // group header
+              c.summary,         // description
+              null, null, true))
+          }
+        }
 
   private final class JLineEditor(terminal: Terminal, reader: LineReader) extends LineEditor:
 

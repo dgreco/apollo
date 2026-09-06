@@ -175,6 +175,43 @@ class ReplCommandsSuite extends munit.FunSuite:
     assertEquals(ReplCommands.worktreeCommand("bogus"), None)
   }
 
+  test("completeSlash filters by name/alias prefix, incrementally") {
+    // bare slash → everything
+    assertEquals(ReplCommands.completeSlash("/").length, ReplCommands.commandCatalog.length)
+    // narrows as characters are added
+    val s = ReplCommands.completeSlash("/s").map(_.name).toSet
+    assert(s.contains("status") && s.contains("save") && s.contains("sessions") && s.contains("steer") && s.contains("snapshot") && s.contains("skills") && s.contains("stop"), s.toString)
+    assert(!s.contains("model"), s.toString)
+    val st = ReplCommands.completeSlash("/st").map(_.name).toSet
+    assert(st == Set("status", "steer", "stop"), st.toString)
+    // exact single match
+    assertEquals(ReplCommands.completeSlash("/handoff").map(_.name), List("handoff"))
+    // alias prefix matches (q → quit)
+    assert(ReplCommands.completeSlash("/q").exists(_.name == "quit"))
+    assert(ReplCommands.completeSlash("/hi").exists(_.name == "status")) // history alias
+    // once a space is typed (args started), no menu
+    assertEquals(ReplCommands.completeSlash("/model gpt"), Nil)
+    // non-slash line → nothing
+    assertEquals(ReplCommands.completeSlash("hello"), Nil)
+    // no match → empty
+    assertEquals(ReplCommands.completeSlash("/zzz"), Nil)
+  }
+
+  test("catalog has no duplicate names/aliases and formatMenu caps") {
+    val all = ReplCommands.commandCatalog.flatMap(_.names)
+    assertEquals(all.distinct.length, all.length, s"duplicate command names/aliases: $all")
+    val menu = ReplCommands.formatMenu(ReplCommands.completeSlash("/"), max = 5)
+    assertEquals(menu.length, 6) // 5 shown + "… N more"
+    assert(menu.last.contains("more"), menu.last)
+  }
+
+  test("helpText is generated from the catalog and covers every command") {
+    val h = ReplCommands.helpText
+    assert(h.contains("/help") && h.contains("/handoff") && h.contains("/kanban"), h.take(200))
+    // every catalog command's primary name appears in help
+    ReplCommands.commandCatalog.foreach(c => assert(h.contains("/" + c.name), s"missing /${c.name} in help"))
+  }
+
   test("blueprint slot parsing + template rendering") {
     assertEquals(ReplCommands.parseSlots(List("topic=infra", "x=y")), Map("topic" -> "infra", "x" -> "y"))
     assertEquals(ReplCommands.renderTemplate("do {topic} now", Map("topic" -> "infra")), "do infra now")

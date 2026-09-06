@@ -812,66 +812,7 @@ final class Repl(
           }
       }.andThen(true)
 
-  private def helpText: String =
-    """commands
-      |  /help                    this help
-      |  /version | /v            show apollo + model version
-      |  /whoami                  show access level
-      |  /model [name]            show or switch the model (provider:model or bare id)
-      |  /reasoning <level>       none|minimal|low|medium|high|xhigh|max
-      |  /reasoning-display       toggle thinking display
-      |  /verbose                 toggle tool-progress display
-      |session
-      |  /status | /history       model, message count, token usage, context %
-      |  /usage                   cumulative token usage
-      |  /config                  effective configuration summary
-      |  /profile                 active profile and home dir
-      |  /reset | /new            clear the conversation
-      |  /clear                   clear screen + fresh conversation
-      |  /redraw                  repaint the banner
-      |  /title <name>            name the current session
-      |  /compress | /compact     force context compaction before the next call
-      |  /save [file.md]          write the transcript to Markdown (default <session>.md)
-      |  /prompt | /compose [text]   compose a multi-line message (end with '.')
-      |  /retry                   re-run the last user turn
-      |  /copy                    copy the last reply to the clipboard
-      |  /image <path>            attach an image to your next message
-      |  /sessions                list previous sessions
-      |  /resume <id|latest>      resume a previous session
-      |  /branch | /fork [name]   fork this session into a new one
-      |work
-      |  /plan <task>             write a plan without executing
-      |  /init [notes]            generate/update AGENTS.md from a repo scan
-      |  /diff [args]             git diff of the working tree
-      |  /loop <prompt> [--times N] [--every S]   re-run a prompt N times
-      |  /bg <prompt>             run a prompt in a background session
-      |  /agents | /tasks         list background sessions
-      |  /stop [id]               cancel a background session (all if no id)
-      |  /review [focus]          independent subagent review of the conversation
-      |  /goal [text|show|clear]  standing objective injected into every turn
-      |  /queue [prompt|clear]    stack prompts to run after the next turn
-      |  /moa <prompt>            mixture-of-agents: 3 answers in parallel, then synthesize
-      |  /learn <what>            capture something as a reusable skill
-      |  /heartbeat | /hb [every <interval> <prompt>|status|pause|resume|clear]   recurring idle prompt
-      |  /steer <message>         inject guidance after the next tool call
-      |  /blueprint | /bp [name [k=v…]]   create a cron job from an automation template
-      |  /kanban [show|add <col> <text>|move <id> <col>|rm <id>]   local task board
-      |  /curator [status|archive <name>|restore <name>]   skill maintenance
-      |  /handoff <telegram|discord|slack>   continue this session via a running gateway bot
-      |  /worktree [list|new [name]|prune]   manage git worktrees
-      |  /snapshot [create|list|restore <id>|prune]   snapshot session state
-      |  /rollback [list|create|<number>]     git working-tree checkpoints
-      |tools & services
-      |  /tools                   list active tools
-      |  /skills                  list available skills
-      |  /reload-skills           re-scan installed skills
-      |  /mcp                     MCP server status and tools
-      |  /cron                    list scheduled jobs
-      |  /memory                  show recorded memory
-      |approvals
-      |  /yolo                    toggle dangerous-command approval bypass
-      |  /approvals [manual|off]  show or set the approval mode
-      |  /quit | /exit            exit""".stripMargin
+  private def helpText: String = ReplCommands.helpText
 
   private def doResume(target: String): Boolean < (Sync & Async) =
     store.find(target).map {

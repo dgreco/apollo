@@ -243,4 +243,107 @@ object ReplCommands:
       val body  = if items.isEmpty then "  (empty)" else items.map(c => s"  [${c.id}] ${c.text}").mkString("\n")
       s"$col:\n$body"
     }.mkString("\n")
+
+  // --- command catalog: the single source of truth for /help and completion --
+
+  /** One REPL slash command: primary name, aliases, an argument hint, a one-line
+    * summary, and the help category it belongs to. */
+  final case class CommandInfo(name: String, aliases: List[String], arg: String,
+                               summary: String, category: String):
+    def names: List[String] = name :: aliases
+    /** "/name | /alias …" for display. */
+    def label: String = names.map("/" + _).mkString(" | ")
+
+  /** Category order for `/help`. */
+  private val categoryOrder: List[String] =
+    List("commands", "session", "work", "tools & services", "approvals")
+
+  val commandCatalog: List[CommandInfo] = List(
+    CommandInfo("help", Nil, "", "this help", "commands"),
+    CommandInfo("version", List("v"), "", "show apollo + model version", "commands"),
+    CommandInfo("whoami", Nil, "", "show access level", "commands"),
+    CommandInfo("model", Nil, "[name]", "show or switch the model (provider:model or bare id)", "commands"),
+    CommandInfo("reasoning", Nil, "<level>", "none|minimal|low|medium|high|xhigh|max", "commands"),
+    CommandInfo("reasoning-display", Nil, "", "toggle thinking display", "commands"),
+    CommandInfo("verbose", Nil, "", "toggle tool-progress display", "commands"),
+    CommandInfo("status", List("history"), "", "model, message count, token usage, context %", "session"),
+    CommandInfo("usage", Nil, "", "cumulative token usage", "session"),
+    CommandInfo("config", Nil, "", "effective configuration summary", "session"),
+    CommandInfo("profile", Nil, "", "active profile and home dir", "session"),
+    CommandInfo("reset", List("new"), "", "clear the conversation", "session"),
+    CommandInfo("clear", Nil, "", "clear screen + fresh conversation", "session"),
+    CommandInfo("redraw", Nil, "", "repaint the banner", "session"),
+    CommandInfo("title", Nil, "<name>", "name the current session", "session"),
+    CommandInfo("compress", List("compact"), "", "force context compaction before the next call", "session"),
+    CommandInfo("save", Nil, "[file.md]", "write the transcript to Markdown", "session"),
+    CommandInfo("prompt", List("compose"), "[text]", "compose a multi-line message (end with '.')", "session"),
+    CommandInfo("retry", Nil, "", "re-run the last user turn", "session"),
+    CommandInfo("copy", Nil, "", "copy the last reply to the clipboard", "session"),
+    CommandInfo("image", Nil, "<path>", "attach an image to your next message", "session"),
+    CommandInfo("sessions", Nil, "", "list previous sessions", "session"),
+    CommandInfo("resume", Nil, "<id|latest>", "resume a previous session", "session"),
+    CommandInfo("branch", List("fork"), "[name]", "fork this session into a new one", "session"),
+    CommandInfo("plan", Nil, "<task>", "write a plan without executing", "work"),
+    CommandInfo("init", Nil, "[notes]", "generate/update AGENTS.md from a repo scan", "work"),
+    CommandInfo("diff", Nil, "[args]", "git diff of the working tree", "work"),
+    CommandInfo("loop", List("proactive"), "<prompt> [--times N] [--every S]", "re-run a prompt N times", "work"),
+    CommandInfo("bg", Nil, "<prompt>", "run a prompt in a background session", "work"),
+    CommandInfo("agents", List("tasks"), "", "list background sessions", "work"),
+    CommandInfo("stop", Nil, "[id]", "cancel a background session (all if no id)", "work"),
+    CommandInfo("review", Nil, "[focus]", "independent subagent review of the conversation", "work"),
+    CommandInfo("goal", Nil, "[text|show|clear]", "standing objective injected into every turn", "work"),
+    CommandInfo("queue", Nil, "[prompt|clear]", "stack prompts to run after the next turn", "work"),
+    CommandInfo("moa", Nil, "<prompt>", "mixture-of-agents: 3 answers in parallel, then synthesize", "work"),
+    CommandInfo("learn", Nil, "<what>", "capture something as a reusable skill", "work"),
+    CommandInfo("heartbeat", List("hb"), "[every <interval> <prompt>|status|pause|resume|clear]", "recurring idle prompt", "work"),
+    CommandInfo("steer", Nil, "<message>", "inject guidance after the next tool call", "work"),
+    CommandInfo("blueprint", List("bp"), "[name [k=v…]]", "create a cron job from an automation template", "work"),
+    CommandInfo("kanban", Nil, "[show|add <col> <text>|move <id> <col>|rm <id>]", "local task board", "work"),
+    CommandInfo("curator", Nil, "[status|archive <name>|restore <name>]", "skill maintenance", "work"),
+    CommandInfo("handoff", Nil, "<telegram|discord|slack>", "continue this session via a running gateway bot", "work"),
+    CommandInfo("worktree", Nil, "[list|new [name]|prune]", "manage git worktrees", "work"),
+    CommandInfo("snapshot", List("snap"), "[create|list|restore <id>|prune]", "snapshot session state", "work"),
+    CommandInfo("rollback", Nil, "[list|create|<number>]", "git working-tree checkpoints", "work"),
+    CommandInfo("tools", Nil, "", "list active tools", "tools & services"),
+    CommandInfo("skills", Nil, "", "list available skills", "tools & services"),
+    CommandInfo("reload-skills", Nil, "", "re-scan installed skills", "tools & services"),
+    CommandInfo("mcp", Nil, "", "MCP server status and tools", "tools & services"),
+    CommandInfo("cron", Nil, "", "list scheduled jobs", "tools & services"),
+    CommandInfo("memory", Nil, "", "show recorded memory", "tools & services"),
+    CommandInfo("yolo", Nil, "", "toggle dangerous-command approval bypass", "approvals"),
+    CommandInfo("approvals", Nil, "[manual|off]", "show or set the approval mode", "approvals"),
+    CommandInfo("quit", List("exit", "q"), "", "exit", "approvals")
+  )
+
+  /** Commands whose name or an alias begins with the typed token (the text after
+    * `/`, before any space). A bare `/` returns everything. Once a space has been
+    * typed (args started) or the line isn't a slash line, returns Nil. */
+  def completeSlash(line: String): List[CommandInfo] =
+    if !line.startsWith("/") then Nil
+    else
+      val rest = line.drop(1)
+      if rest.contains(' ') then Nil
+      else
+        val token = rest.toLowerCase
+        commandCatalog.filter(c => c.names.exists(_.toLowerCase.startsWith(token)))
+
+  /** A compact menu of matches for the live completion display. */
+  def formatMenu(matches: List[CommandInfo], max: Int = 8): List[String] =
+    val shown = matches.take(max).map(c => s"  ${("/" + c.name).padTo(18, ' ')} ${c.summary}")
+    if matches.length > max then shown :+ s"  … ${matches.length - max} more" else shown
+
+  /** `/help` text, generated from the catalog so it can never drift from the
+    * actual command set. */
+  def helpText: String =
+    val byCat = commandCatalog.groupBy(_.category)
+    val blocks = categoryOrder.flatMap { cat =>
+      byCat.get(cat).map { cmds =>
+        val lines = cmds.map { c =>
+          val left = (c.label + (if c.arg.isEmpty then "" else s" ${c.arg}")).padTo(40, ' ')
+          s"  $left ${c.summary}"
+        }
+        (cat :: lines).mkString("\n")
+      }
+    }
+    blocks.mkString("\n")
 end ReplCommands

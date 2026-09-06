@@ -11,13 +11,22 @@ import scala.scalanative.unsigned.*
 /** Scala Native line editor: a hand-rolled raw-mode editor over termios
   * (no published readline binding exists for Native). Supports arrow keys,
   * Ctrl-A/E, backspace, insert-at-cursor, in-memory history with
-  * draft-restore, Ctrl-C-clears-line and Ctrl-D-EOF. Falls back to plain
-  * `Console.in` reads when stdin isn't a TTY.
+  * draft-restore, Ctrl-C-clears-line and Ctrl-D-EOF, plus a live slash-command
+  * menu. Falls back to plain `Console.in` reads when stdin isn't a TTY.
   *
   * SIGINT during agent turns is a documented no-op on Native (default OS
   * termination applies) — see README.
   */
 object PlatformEditor:
+
+  // ANSI escape building blocks (Esc = 0x1B), kept as a named char so the
+  // source has no invisible control bytes.
+  private val Esc      = 27.toChar
+  private val ClrEol   = s"$Esc[K"       // clear to end of line
+  private val ClrBelow = s"$Esc[J"       // clear to end of screen
+  private val SaveCur  = s"${Esc}7"      // DECSC save cursor
+  private val RestCur  = s"${Esc}8"      // DECRC restore cursor
+  private def back(n: Int) = s"$Esc[${n}D" // move cursor left n columns
 
   def create: LineEditor < Sync =
     Sync.defer {
@@ -50,6 +59,8 @@ object PlatformEditor:
     @volatile private var curLine   = ""  // current visible buffer contents
     @volatile private var curBack   = 0   // columns from line end back to the cursor
     @volatile private var curMask   = false
+    // Live slash-command menu (Hermes-style). On by default; APOLLO_NO_COMMAND_MENU disables.
+    private val menuEnabled = !sys.env.contains("APOLLO_NO_COMMAND_MENU")
 
     def readLine(prompt: String): Maybe[String] < (Sync & Async) =
       Sync.defer(edit(prompt, mask = false))
@@ -61,17 +72,18 @@ object PlatformEditor:
 
     def isInteractive: Boolean < Sync = Sync.defer(true)
 
-    // Emit output above the live input line: erase the line, print the text,
-    // then reprint the prompt + current buffer and restore the cursor. Serialized
-    // with the edit loop's own redraw via ioLock so their writes never interleave.
+    // Emit output above the live input line: clear the line (and any menu below),
+    // print the text, then reprint the prompt + current buffer and restore the
+    // cursor. Serialized with the edit loop's own redraw via ioLock so their
+    // writes never interleave.
     def printAbove(text: String): Unit < Sync = Sync.defer {
       ioLock.synchronized {
         if reading && !curMask then
-          print("\r[K")
+          print(s"\r$ClrBelow")
           print(text)
           print("\n")
           print(s"$curPrompt$curLine")
-          if curBack > 0 then print(s"[${curBack}D")
+          if curBack > 0 then print(back(curBack))
           java.lang.System.out.flush()
         else
           println(text)
@@ -89,10 +101,23 @@ object PlatformEditor:
 
         def redraw(): Unit =
           val shown = if mask then "*" * buffer.length else buffer.mkString
-          val back  = buffer.length - cursor
-          curPrompt = prompt; curLine = shown; curBack = back; curMask = mask // for a concurrent printAbove
-          print(s"\r\u001b[K$prompt$shown")
-          if back > 0 then print(s"\u001b[${back}D")
+          val b     = buffer.length - cursor
+          curPrompt = prompt; curLine = shown; curBack = b; curMask = mask // for a concurrent printAbove
+          // Live command menu: filtered matches drawn below the input line while
+          // typing a slash command. The whole region is cleared each redraw with
+          // ClrBelow; the cursor is saved/restored around the menu (SaveCur/RestCur).
+          val menu =
+            if menuEnabled && !mask then
+              ReplCommands.formatMenu(ReplCommands.completeSlash(buffer.mkString), 6).map(_.take(78))
+            else Nil
+          val sb = new StringBuilder
+          sb.append("\r").append(ClrBelow).append(prompt).append(shown)
+          if menu.nonEmpty then
+            sb.append(SaveCur)
+            menu.foreach(l => sb.append("\n").append(l))
+            sb.append(RestCur)
+          if b > 0 then sb.append(back(b))
+          print(sb.toString)
           java.lang.System.out.flush()
 
         reading = true
@@ -104,6 +129,9 @@ object PlatformEditor:
               if buffer.isEmpty then result = Present(Absent)
               else () // Ctrl-D mid-line ignored
             case 13 | 10 => // Enter
+              // Wipe any command menu below, keep the committed input line.
+              val shownNow = if mask then "*" * buffer.length else buffer.mkString
+              print(s"\r$ClrBelow$prompt$shownNow")
               println()
               val line = buffer.mkString
               if line.nonEmpty && !mask then history += line
