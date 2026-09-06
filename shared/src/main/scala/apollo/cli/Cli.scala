@@ -2,7 +2,7 @@ package apollo.cli
 
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
 import apollo.config.*
-import apollo.core.Message
+import apollo.core.{Message, Content, Role}
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore}
 import apollo.skills.SkillStore
@@ -167,7 +167,9 @@ object Cli:
                        )
       agent          = new Agent(runtime, toolCtx, store, sessionId,
                          maxIterations = config.maxTurns, interruptFlag = interruptFlag)
-      ctxWithDelegate = toolCtx.copy(delegate = Present(delegateRunner(runtime, toolCtx, store, config)))
+      ctxWithDelegate = toolCtx.copy(
+                          delegate = Present(delegateRunner(runtime, toolCtx, store, config)),
+                          vision   = Present(visionRunner(runtime, toolCtx, store, config)))
       agentFinal     = new Agent(runtime, ctxWithDelegate, store, sessionId,
                          maxIterations = config.maxTurns, interruptFlag = interruptFlag)
       historyV       = (resumed match
@@ -233,6 +235,39 @@ object Cli:
         yield
           if result.finalResponse.nonEmpty then result.finalResponse.take(24000)
           else s"[subagent ended: ${result.exitReason}]"
+
+  /** Backs the vision_analyze tool: a single vision-model call with the image
+    * attached (no tools, one turn). Reuses the main runtime + wire transports,
+    * which already serialize Content.Image. */
+  private def visionRunner(
+      runtime: ResolvedRuntime,
+      parentCtx: ToolContext,
+      store: SessionStore,
+      config: ApolloConfig
+  ): VisionRunner =
+    new VisionRunner:
+      def analyze(mediaType: String, base64: String, prompt: String): String < (Sync & Async) =
+        for
+          now     <- Sync.defer(java.time.Instant.now())
+          childId  = store.newSessionId(now)
+          todoRef <- AtomicRef.init(List.empty[TodoItem])
+          childCtx = parentCtx.copy(platform = "vision", sessionId = childId, todo = todoRef,
+                       delegate = Absent, vision = Absent, ui = UnattendedToolUi)
+          flag     = new java.util.concurrent.atomic.AtomicBoolean(false)
+          child    = new Agent(runtime, childCtx, store, childId, maxIterations = Present(1), interruptFlag = flag)
+          _       <- store.create(SessionMeta(
+                       id = childId, title = Present("vision"), platform = "vision",
+                       model = runtime.model, provider = runtime.providerSlug,
+                       startedAt = now.toEpochMilli / 1000.0, endedAt = Absent, cwd = parentCtx.cwd.toString,
+                       messageCount = 0, apiCalls = 0, usage = apollo.core.Usage.zero))
+          system  <- SystemPrompt.build(SystemPrompt.Input(
+                       config, parentCtx.paths, parentCtx.skills, parentCtx.cwd,
+                       "vision", runtime.model, runtime.providerSlug, Nil))
+          msg      = Message(Role.User, List(Content.Image(mediaType, base64), Content.Text(prompt)), Absent)
+          result  <- child.runTurn(msg, system, Nil, TurnCallbacks())
+        yield
+          if result.finalResponse.nonEmpty then result.finalResponse.take(24000)
+          else s"[vision call ended: ${result.exitReason}]"
 
   private def runOneShot(session: Session, prompt: String): Unit < (Sync & Async) =
     for

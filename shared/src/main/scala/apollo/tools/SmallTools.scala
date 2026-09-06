@@ -1,7 +1,7 @@
 package apollo.tools
 
 import apollo.config.Fs
-import apollo.util.Jx
+import apollo.util.{Jx, Crypto}
 import apollo.util.Jx.*
 import kyo.*
 import kyo.Structure.Value
@@ -305,6 +305,50 @@ object SessionSearchTool:
             search(query, (args / "limit").asLong.map(_.toInt).getOrElse(3).min(10)).map(ToolOutcome.Ok(_))
           case (Absent, _) => ToolOutcome.Error("missing required parameter: query")
           case _           => ToolOutcome.Error("session search is unavailable in this context")
+    )
+  )
+
+/** vision_analyze — analyze a local image with a vision model. Thin wrapper over
+  * a VisionRunner injected via ToolContext (a single vision-model call). The wire
+  * transports already serialize Content.Image, so this reaches any vision model. */
+object VisionTool:
+  private def mediaType(path: String): Option[String] =
+    val p = path.toLowerCase
+    if p.endsWith(".png") then Some("image/png")
+    else if p.endsWith(".jpg") || p.endsWith(".jpeg") then Some("image/jpeg")
+    else if p.endsWith(".gif") then Some("image/gif")
+    else if p.endsWith(".webp") then Some("image/webp")
+    else None
+
+  val entries: List[ToolEntry] = List(
+    ToolEntry(
+      name = "vision_analyze",
+      toolset = "vision",
+      description =
+        "Analyze a local image file (png/jpg/gif/webp) with a vision model — describe it, read text " +
+          "in it, or answer a question about it.",
+      parametersJson = """{"type":"object","properties":{
+        "path":{"type":"string","description":"Path to the image file"},
+        "prompt":{"type":"string","description":"What to look for (default: describe the image in detail)"}
+      },"required":["path"]}""".replaceAll("\n\\s*", ""),
+      emoji = "👁",
+      available = _.vision.nonEmpty,
+      handler = (args, ctx) =>
+        (ctx.vision, (args / "path").asStr) match
+          case (Absent, _) => ToolOutcome.Error("vision analysis is unavailable in this context")
+          case (_, Absent) => ToolOutcome.Error("missing required parameter: path")
+          case (Present(runner), Present(path)) =>
+            mediaType(path) match
+              case None => ToolOutcome.Error(s"unsupported image type: $path (use png/jpg/gif/webp)")
+              case Some(mt) =>
+                Fs.readBytes(ctx.cwd.resolve(path)).map { bytes0 =>
+                  val out: ToolOutcome < (Sync & Async) = bytes0 match
+                    case Absent => ToolOutcome.Error(s"file not found: $path")
+                    case Present(bytes) =>
+                      val prompt = (args / "prompt").asStr.getOrElse("Describe this image in detail.")
+                      runner.analyze(mt, Crypto.base64(bytes), prompt).map(ToolOutcome.Ok(_))
+                  out
+                }
     )
   )
 

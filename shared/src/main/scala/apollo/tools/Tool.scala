@@ -47,6 +47,8 @@ final case class ToolContext(
     delegate: Maybe[DelegateRunner] = Absent,
     /** Searches past sessions; wired by the session layer. */
     sessionSearch: Maybe[(String, Int) => String < (Sync & Async)] = Absent,
+    /** Analyzes an image with a vision model; wired by the agent layer. */
+    vision: Maybe[VisionRunner] = Absent,
     interruptRequested: () => Boolean < Sync = () => false
 )
 
@@ -71,6 +73,11 @@ final case class TodoItem(id: String, content: String, status: String, parent: M
 trait DelegateRunner:
   def run(goal: String, context: String, toolsets: List[String]): String < (Sync & Async)
 
+/** Interface the vision_analyze tool uses to run a single vision-model call
+  * (a tool cannot import the provider layer without a cycle). */
+trait VisionRunner:
+  def analyze(mediaType: String, base64: String, prompt: String): String < (Sync & Async)
+
 /** One registered tool: wire schema + handler + availability probe. */
 final case class ToolEntry(
     name: String,
@@ -92,7 +99,7 @@ object ToolRegistry:
   lazy val all: List[ToolEntry] =
     FileTools.entries ++ TerminalTools.entries ++ TodoTool.entries ++ MemoryTool.entries
       ++ SkillsTools.entries ++ ClarifyTool.entries ++ WebTools.entries ++ CronTool.entries
-      ++ SessionSearchTool.entries ++ DelegateTool.entries
+      ++ SessionSearchTool.entries ++ DelegateTool.entries ++ VisionTool.entries
 
   private lazy val builtinByName: Map[String, ToolEntry] = all.map(t => t.name -> t).toMap
 
