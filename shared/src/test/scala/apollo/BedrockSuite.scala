@@ -131,7 +131,7 @@ class BedrockSuite extends munit.FunSuite:
             BedrockTransport.hSecretKey  -> "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
             BedrockTransport.hRegion     -> "us-east-1",
             BedrockTransport.hEndpoint   -> s"http://127.0.0.1:${server.port}"
-          ), "anthropic.claude-3-5-sonnet-20241022-v2:0")
+          ), "anthropic.claude-3-5-sonnet-20241022-v2:0").copy(streaming = false)
           Abort.run[ProviderError](
             BedrockTransport.streamTurn(req(rt, List(Message.user("ping"))))(_ => ())
           )

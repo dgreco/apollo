@@ -9,10 +9,9 @@ import kyo.Structure.Value
 /** AWS Bedrock **Converse** wire (`POST /model/{modelId}/converse`), signed
   * with SigV4. Structurally close to the Anthropic Messages format —
   * content-block messages, `toolUse`/`toolResult`, a separate `system` — but
-  * camelCase keys and AWS auth. Non-streaming only: the ConverseStream
-  * endpoint speaks the binary `application/vnd.amazon.eventstream` codec,
-  * which is a documented follow-up; the agent loop works unchanged on
-  * complete responses.
+  * camelCase keys and AWS auth. Supports both `converse` (complete response) and
+  * `converse-stream` (the binary `application/vnd.amazon.eventstream` codec,
+  * decoded by `apollo.util.EventStream`), selected by `model.streaming`.
   *
   * AWS credentials + region arrive via private slots in `runtime.headers`
   * (see `Runtime.awsCreds`); they are consumed here and never sent as HTTP
@@ -42,7 +41,9 @@ object BedrockTransport extends WireTransport:
         val endpoint = rt.headers.getOrElse(hEndpoint,
           s"https://bedrock-runtime.$region.amazonaws.com")
         val modelId  = rt.wireModel
-        val path     = s"/model/${encodePathSegment(modelId)}/converse"
+        val stream   = rt.streaming
+        val verb     = if stream then "converse-stream" else "converse"
+        val path     = s"/model/${encodePathSegment(modelId)}/$verb"
         val url      = s"${endpoint.stripSuffix("/")}$path"
         val body     = Jx.render(buildBody(request))
         val creds = SigV4.Credentials(
@@ -52,16 +53,102 @@ object BedrockTransport extends WireTransport:
         )
         val host = hostOf(url)
         signedHeadersV(creds, region, host, path, body).map { headers =>
-          // Bedrock streams a binary event-stream we don't decode; always
-          // request the complete response and surface it in one shot.
-          Transport.postJson(url, headers, body).map { text =>
-            Jx.parse(text) match
-              case Result.Success(json) =>
-                onEvent(StreamEvent.Done).andThen(Abort.get(parseComplete(json)))
-              case _ => Abort.fail(ProviderError.Protocol("unparseable Bedrock Converse response"))
-          }
+          if stream then streamConverse(url, headers, body)(onEvent)
+          else
+            Transport.postJson(url, headers, body).map { text =>
+              Jx.parse(text) match
+                case Result.Success(json) =>
+                  onEvent(StreamEvent.Done).andThen(Abort.get(parseComplete(json)))
+                case _ => Abort.fail(ProviderError.Protocol("unparseable Bedrock Converse response"))
+            }
         }
   end streamTurn
+
+  /** ConverseStream: decode the binary eventstream, emit deltas as they arrive,
+    * and assemble the final response from the accumulated blocks. */
+  private def streamConverse(url: String, headers: List[(String, String)], body: String)(
+      onEvent: StreamEvent => Unit < (Sync & Async)
+  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+    val acc = new StreamAcc
+    Transport.postEventStream(url, headers, body) { frame =>
+      frame.messageType match
+        case Some("exception") =>
+          Sync.defer(acc.offerException(new String(frame.payload, "UTF-8")))
+        case _ =>
+          frame.eventType match
+            case Some(evt) =>
+              Jx.parse(new String(frame.payload, "UTF-8")) match
+                case Result.Success(p) => Kyo.foreachDiscard(acc.offer(evt, p))(onEvent)
+                case _                 => Sync.defer(())
+            case None => Sync.defer(())
+    }.andThen(onEvent(StreamEvent.Done)).andThen(Abort.get(acc.result))
+
+  /** Accumulates ConverseStream events into one TurnResponse. Pure/testable:
+    * `offer` folds an event and returns the deltas to surface. */
+  private[provider] final class StreamAcc:
+    private final class Block:
+      var isTool      = false
+      var toolId      = ""
+      var toolName    = ""
+      val input       = new StringBuilder
+      var isReasoning = false
+      val text        = new StringBuilder
+    private val blocks = scala.collection.mutable.LinkedHashMap[Int, Block]()
+    private var stopReason         = ""
+    private var usage             = Usage.zero
+    private var error: Maybe[String] = Absent
+
+    def offerException(msg: String): Unit = error = Present(msg)
+
+    def offer(eventType: String, p: Value): List[StreamEvent] =
+      def block(idx: Int): Block = blocks.getOrElseUpdate(idx, new Block)
+      def idxOf: Int = (p / "contentBlockIndex").asLong.getOrElse(0L).toInt
+      eventType match
+        case "contentBlockStart" =>
+          val b = block(idxOf)
+          (p / "start" / "toolUse") match
+            case Present(tu) =>
+              b.isTool = true
+              b.toolId = (tu / "toolUseId").asStr.getOrElse("")
+              b.toolName = (tu / "name").asStr.getOrElse("")
+              List(StreamEvent.ToolUseStarted(b.toolId, b.toolName))
+            case Absent => Nil
+        case "contentBlockDelta" =>
+          val b = block(idxOf)
+          val d = p / "delta"
+          (d / "text").asStr match
+            case Present(t) => b.text.append(t); List(StreamEvent.TextDelta(t))
+            case Absent =>
+              (d / "toolUse" / "input").asStr match
+                case Present(inp) => b.input.append(inp); List(StreamEvent.ToolUseArgsDelta(b.toolId, inp))
+                case Absent =>
+                  (d / "reasoningContent" / "text").asStr match
+                    case Present(r) => b.isReasoning = true; b.text.append(r); List(StreamEvent.ThinkingDelta(r))
+                    case Absent     => Nil
+        case "messageStop" =>
+          stopReason = (p / "stopReason").asStr.getOrElse(stopReason); Nil
+        case "metadata" =>
+          val u = p / "usage"
+          usage = Usage(
+            inputTokens = (u / "inputTokens").asLong.getOrElse(0L),
+            outputTokens = (u / "outputTokens").asLong.getOrElse(0L))
+          Nil
+        case _ => Nil
+
+    def result: Result[ProviderError, TurnResponse] =
+      error match
+        case Present(m) => Result.fail(ProviderError.Protocol(s"Bedrock stream error: $m"))
+        case Absent =>
+          val content = blocks.toList.sortBy(_._1).flatMap { (_, b) =>
+            if b.isTool then
+              List(Content.ToolUse(b.toolId, b.toolName, if b.input.isEmpty then "{}" else b.input.toString))
+            else if b.isReasoning then List(Content.Thinking(b.text.toString, Absent))
+            else if b.text.nonEmpty then List(Content.Text(b.text.toString))
+            else Nil
+          }
+          val hasTools = content.exists { case _: Content.ToolUse => true; case _ => false }
+          Result.succeed(TurnResponse(Message(Role.Assistant, content), mapStop(stopReason, hasTools), usage))
+  end StreamAcc
 
   private def signedHeadersV(
       creds: SigV4.Credentials, region: String, host: String, path: String, body: String

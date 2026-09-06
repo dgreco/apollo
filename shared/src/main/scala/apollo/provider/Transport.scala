@@ -1,6 +1,6 @@
 package apollo.provider
 
-import apollo.util.{Sse, Utf8}
+import apollo.util.{EventStream, Sse, Utf8}
 import kyo.*
 
 /** HTTP plumbing shared by every wire transport: POST a JSON body, consume
@@ -63,6 +63,39 @@ object Transport:
                 .map { _ =>
                   Kyo.foreachDiscard(Sse.flush(sseState))(onEvent).map(_ => Result.succeed(()))
                 }
+          }
+          }
+        }
+      }
+    }
+
+  /** POSTs `body` and feeds each decoded AWS eventstream frame to `onFrame` as
+    * it arrives (Bedrock ConverseStream). Non-2xx bodies surface as
+    * `ProviderError.Http` with the provider's own message. */
+  def postEventStream(
+      url: String,
+      headers: List[(String, String)],
+      body: String,
+      timeout: Duration = turnTimeout
+  )(onFrame: EventStream.Frame => Unit < (Sync & Async)): Unit < (Sync & Async & Abort[ProviderError]) =
+    withRequest(url, (baseHeaders :+ ("accept" -> "application/vnd.amazon.eventstream")) ++ headers, body) { req =>
+      liftResult {
+        HttpClient.withConfig(_.timeout(timeout)) {
+          HttpClient.use { client =>
+          client.sendWith(streamRoute, req) { resp =>
+            if !resp.status.isSuccess then
+              collectBytes(resp.fields.body).map { bytes =>
+                Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+              }
+            else
+              var esState = EventStream.empty
+              resp.fields.body
+                .foreach { span =>
+                  val (frames, next) = EventStream.feed(esState, span.toArray)
+                  esState = next
+                  Kyo.foreachDiscard(frames)(onFrame)
+                }
+                .map(_ => Result.succeed(()))
           }
           }
         }
