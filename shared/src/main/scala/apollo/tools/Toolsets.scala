@@ -25,7 +25,7 @@ object Toolsets:
     "skills_list", "skill_view", "skill_manage",
     "todo_list", "memory", "session_search",
     "clarify", "delegate_task", "cronjob_manage",
-    "vision_analyze"
+    "vision_analyze", "execute_code", "tool_search"
   )
 
   private val webhookSafeTools = List("web_search", "web_extract", "clarify")
@@ -45,6 +45,8 @@ object Toolsets:
     "delegation"     -> Def("Spawn isolated subagents", List("delegate_task")),
     "cronjob"        -> Def("Schedule and manage automated tasks", List("cronjob_manage")),
     "vision"         -> Def("Analyze images with a vision model", List("vision_analyze")),
+    "code_execution" -> Def("Run code snippets", List("execute_code")),
+    "tool_search"    -> Def("Discover available tools by keyword", List("tool_search")),
     // Composite / scenario toolsets
     "debugging" -> Def("Troubleshooting bundle", Nil, List("terminal", "web", "file")),
     "safe"      -> Def("No terminal access", Nil, List("web")),

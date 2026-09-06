@@ -44,8 +44,54 @@ object TerminalTools:
       emoji = "⚙️",
       maxResultChars = 50000,
       handler = processManage
+    ),
+    ToolEntry(
+      name = "execute_code",
+      toolset = "code_execution",
+      description =
+        "Run a short code snippet in a language (python, node/javascript, ruby, bash) and return its " +
+          "output. For anything file-based or long-running, use the terminal tool instead.",
+      parametersJson = """{"type":"object","properties":{
+        "language":{"type":"string","description":"python | node | javascript | ruby | bash | sh"},
+        "code":{"type":"string","description":"The snippet to run"},
+        "timeout":{"type":"integer","description":"Seconds before it is killed","default":180},
+        "workdir":{"type":"string","description":"Working directory"}
+      },"required":["language","code"]}""".replaceAll("\n\\s*", ""),
+      emoji = "🐍",
+      maxResultChars = 50000,
+      handler = executeCode
     )
   )
+
+  /** Maps a language + snippet to a shell command string, or None if the
+    * language is unsupported. Kept pure for testing. */
+  private[tools] def codeCommand(language: String, code: String): Option[String] =
+    val interp = language.trim.toLowerCase match
+      case "python" | "python3" | "py" => Some("python3 -c")
+      case "node" | "javascript" | "js" => Some("node -e")
+      case "ruby" | "rb"                => Some("ruby -e")
+      case "bash"                       => Some("bash -c")
+      case "sh" | "shell"               => Some("sh -c")
+      case _                            => None
+    interp.map(prefix => s"$prefix ${shellQuote(code)}")
+
+  private def executeCode(args: Value, ctx: ToolContext): ToolOutcome < (Sync & Async) =
+    ((args / "language").asStr, (args / "code").asStr) match
+      case (Absent, _) => ToolOutcome.Error("missing required parameter: language")
+      case (_, Absent) => ToolOutcome.Error("missing required parameter: code")
+      case (Present(language), Present(code)) =>
+        codeCommand(language, code) match
+          case None => ToolOutcome.Error(s"unsupported language: $language (python/node/javascript/ruby/bash/sh)")
+          case Some(command) =>
+            val timeout = (args / "timeout").asLong.map(_.toInt).getOrElse(ctx.config.terminalTimeoutSeconds)
+            val workdir = (args / "workdir").asStr.map(w => ctx.cwd.resolve(w)).getOrElse(ctx.cwd)
+            ctx.approvals.check(command, ctx.ui).map {
+              case Result.Failure(reason) => ToolOutcome.Error(reason)
+              case _ =>
+                backendCommand(command, workdir, ctx.config) match
+                  case Left(err)  => ToolOutcome.Error(err)
+                  case Right(cmd) => runForeground(cmd, timeout)
+            }
 
   // --- background process registry ---------------------------------------
 

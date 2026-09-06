@@ -41,8 +41,8 @@ into a platform. Roughly ordered by value/effort.
 | Gap | Notes |
 |---|---|
 | ~~**`vision_analyze` tool**~~ | **Done** — analyzes an image file via an injected `VisionRunner`; new `vision` toolset. |
-| **`execute_code` tool** | dedicated (sandboxed) code execution; apollo has only `terminal`. |
-| **`tool_search`** | dynamic tool discovery — valuable once many MCP tools are loaded. |
+| ~~**`execute_code` tool**~~ | **Done** — runs a snippet per language (python/node/ruby/bash/sh) via the terminal backend; `code_execution` toolset. |
+| ~~**`tool_search`**~~ | **Done** — keyword search over all registered tools (built-in + MCP); `tool_search` toolset. |
 | **Background auto-review** | Hermes forks an agent after each turn to *actually save* skills/memory; apollo's nudges only *remind*. |
 | **MCP: sampling + elicitation** | server-initiated `sampling/createMessage` + elicitation; plus **MCP server mode** (expose apollo's tools as MCP) and the legacy **SSE** transport. |
 | **Provider OAuth** | Copilot, ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini `generateContent`, and the **MoA** virtual provider — apollo currently marks these unsupported. |

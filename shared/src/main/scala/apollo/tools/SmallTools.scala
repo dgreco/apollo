@@ -352,6 +352,40 @@ object VisionTool:
     )
   )
 
+/** tool_search — discover available tools (built-in + MCP) by keyword. */
+object ToolSearchTool:
+  /** Pure: tools whose name, toolset, or description contains the query. */
+  def search(entries: List[(String, String, String)], query: String, limit: Int): List[(String, String, String)] =
+    val q = query.trim.toLowerCase
+    val hits =
+      if q.isEmpty then entries
+      else entries.filter((n, ts, d) => n.toLowerCase.contains(q) || ts.toLowerCase.contains(q) || d.toLowerCase.contains(q))
+    hits.sortBy(_._1).take(math.max(1, limit))
+
+  val entries: List[ToolEntry] = List(
+    ToolEntry(
+      name = "tool_search",
+      toolset = "tool_search",
+      description =
+        "Search all available tools (built-in and MCP) by keyword; returns matching tool names, their " +
+          "toolset, and a one-line description.",
+      parametersJson = """{"type":"object","properties":{
+        "query":{"type":"string","description":"Keyword matched against tool name, toolset, or description"},
+        "limit":{"type":"integer","default":20,"maximum":50}
+      },"required":["query"]}""".replaceAll("\n\\s*", ""),
+      emoji = "🧰",
+      handler = (args, _) =>
+        (args / "query").asStr match
+          case Absent => ToolOutcome.Error("missing required parameter: query")
+          case Present(query) =>
+            val all   = ToolRegistry.byName.values.toList.map(t => (t.name, t.toolset, t.description))
+            val limit = (args / "limit").asLong.map(_.toInt).getOrElse(20).min(50)
+            ToolSearchTool.search(all, query, limit) match
+              case Nil  => ToolOutcome.Ok(s"no tools match '$query'")
+              case hits => ToolOutcome.Ok(hits.map((n, ts, d) => s"$n ($ts): $d").mkString("\n"))
+    )
+  )
+
 object DelegateTool:
   val entries: List[ToolEntry] = List(
     ToolEntry(
