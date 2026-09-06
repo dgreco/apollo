@@ -5,7 +5,7 @@ import apollo.cli.{CliArgs, Style, UnattendedToolUi}
 import apollo.config.{ApolloConfig, ApolloPaths}
 import apollo.core.Message
 import apollo.provider.*
-import apollo.session.{SessionMeta, SessionStore}
+import apollo.session.{SessionMeta, SessionStore, HandoffStore}
 import apollo.skills.SkillStore
 import apollo.tools.*
 import apollo.config.Yaml.*
@@ -207,6 +207,18 @@ final class SessionHub(config: ApolloConfig, paths: ApolloPaths, runtime: Resolv
                        endedAt = Absent, cwd = ctx.cwd.toString, messageCount = 0, apiCalls = 0,
                        usage = apollo.core.Usage.zero
                      ))
+          // Adopt a pending `/handoff` from the REPL: seed this new session with
+          // the handed-off transcript (consume-once).
+          handoff <- HandoffStore.consume(paths, platform)
+          _       <- handoff match
+                       case Present(h) =>
+                         store.loadTranscript(h.sessionId).map { msgs =>
+                           if msgs.isEmpty then Sync.defer(())
+                           else
+                             agent.restore(msgs)
+                             store.rewriteTranscript(id, msgs)
+                         }
+                       case Absent => Sync.defer(())
         yield
           val e = Entry(agent, meter, tools, id)
           Option(sessions.putIfAbsent(key, e)).getOrElse(e)

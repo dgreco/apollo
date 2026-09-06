@@ -7,7 +7,7 @@ import apollo.cron.{CronStore, CronJob, Schedule}
 import apollo.util.{Crypto, Jx}
 import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
-import apollo.session.{SessionStore, SessionMeta}
+import apollo.session.{SessionStore, SessionMeta, HandoffStore}
 import apollo.tools.{ToolContext, Toolsets, ToolRegistry}
 import kyo.*
 
@@ -363,6 +363,17 @@ final class Repl(
       case "review" => doReview(arg)
       case "image" =>
         if arg.isEmpty then Console.printLine("usage: /image <path>").andThen(true) else doImage(arg)
+      case "handoff" =>
+        if arg.isEmpty || !HandoffStore.isPlatform(arg.toLowerCase) then
+          Console.printLine("usage: /handoff <telegram|discord|slack>").andThen(true)
+        else
+          val platform = arg.toLowerCase
+          Sync.defer(java.time.Instant.now().toEpochMilli / 1000.0).map { now =>
+            HandoffStore.write(toolCtx.paths, platform, sess, now).andThen(
+              Console.printLine(Style.dim(
+                s"handoff queued for $platform — with `apollo gateway` running, message your bot there to continue this session"))
+            )
+          }.andThen(true)
       case "blueprint" | "bp" => doBlueprint(arg)
       case "kanban" => doKanban(arg)
       case "curator" => doCurator(arg)
@@ -846,6 +857,7 @@ final class Repl(
       |  /blueprint | /bp [name [k=v…]]   create a cron job from an automation template
       |  /kanban [show|add <col> <text>|move <id> <col>|rm <id>]   local task board
       |  /curator [status|archive <name>|restore <name>]   skill maintenance
+      |  /handoff <telegram|discord|slack>   continue this session via a running gateway bot
       |  /worktree [list|new [name]|prune]   manage git worktrees
       |  /snapshot [create|list|restore <id>|prune]   snapshot session state
       |  /rollback [list|create|<number>]     git working-tree checkpoints
