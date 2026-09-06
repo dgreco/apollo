@@ -3,7 +3,7 @@ package apollo.cli
 import apollo.config.{Fs, ApolloConfig, ApolloPaths}
 import apollo.config.Yaml.*
 import apollo.cron.CronStore
-import apollo.provider.{CopilotAuth, Profiles, ResolveError, Runtime, RuntimeOverrides}
+import apollo.provider.{CopilotAuth, Profiles, QwenAuth, ResolveError, Runtime, RuntimeOverrides}
 import apollo.session.SessionStore
 import apollo.skills.SkillStore
 import apollo.tools.Toolsets
@@ -268,7 +268,7 @@ object Commands:
               )
     yield ()
 
-  /** `apollo auth copilot [login|status|logout]` — GitHub Copilot OAuth. */
+  /** `apollo auth <copilot|qwen> [login|status|logout]` — provider OAuth. */
   def auth(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
     args.commandArgs match
       case "copilot" :: rest =>
@@ -280,8 +280,17 @@ object Commands:
               case Absent     => Console.printLine("copilot: not logged in (run `apollo auth copilot login`)")
             }
           case _ => copilotLogin(paths)
+      case "qwen" :: rest =>
+        rest.headOption.getOrElse("login") match
+          case "logout" => QwenAuth.logout(paths).andThen(Console.printLine("qwen: logged out"))
+          case "status" =>
+            QwenAuth.load(paths).map {
+              case Present(_) => Console.printLine("qwen: an OAuth token is stored (chat with -m qwen:<model>)")
+              case Absent     => Console.printLine("qwen: not logged in (run `apollo auth qwen login`)")
+            }
+          case _ => qwenLogin(paths)
       case _ =>
-        Console.printLine("usage: apollo auth copilot [login|status|logout]")
+        Console.printLine("usage: apollo auth <copilot|qwen> [login|status|logout]")
 
   private def copilotLogin(paths: ApolloPaths): Unit < (Sync & Async) =
     CopilotAuth.deviceStart().map {
@@ -305,5 +314,30 @@ object Commands:
         case CopilotAuth.Poll.Success(tok) =>
           CopilotAuth.saveGithubToken(paths, tok).andThen(
             Console.printLine(Style.green("copilot: logged in — use  -m copilot:<model>  (e.g. copilot:gpt-4o)")))
+      }
+
+  private def qwenLogin(paths: ApolloPaths): Unit < (Sync & Async) =
+    QwenAuth.deviceStart().map {
+      case Result.Failure(err) => Console.printLine(Style.red(s"qwen login failed: $err"))
+      case Result.Success(dc) =>
+        val where = dc.verificationUriComplete.getOrElse(dc.verificationUri)
+        Console.printLine(
+          s"""To authorize apollo for Qwen:
+             |  1. open ${where}
+             |  2. confirm the code:  ${Style.bold(dc.userCode)}
+             |waiting…""".stripMargin
+        ).andThen(qwenPoll(paths, dc, dc.interval, dc.expiresIn))
+    }
+
+  private def qwenPoll(paths: ApolloPaths, dc: QwenAuth.DeviceCode, interval: Int, remaining: Int): Unit < (Sync & Async) =
+    if remaining <= 0 then Console.printLine(Style.red("qwen login timed out; try again"))
+    else
+      Async.sleep(interval.seconds).andThen(QwenAuth.pollOnce(dc.deviceCode, dc.verifier)).map {
+        case QwenAuth.Poll.Pending      => qwenPoll(paths, dc, interval, remaining - interval)
+        case QwenAuth.Poll.SlowDown     => qwenPoll(paths, dc, interval + 5, remaining - interval)
+        case QwenAuth.Poll.Error(msg)   => Console.printLine(Style.red(s"qwen login failed: $msg"))
+        case QwenAuth.Poll.Success(tok) =>
+          QwenAuth.save(paths, tok).andThen(
+            Console.printLine(Style.green("qwen: logged in — use  -m qwen:<model>  (e.g. qwen:qwen3.5-coder)")))
       }
 end Commands

@@ -147,6 +147,8 @@ object Runtime:
           Abort.fail(ResolveError.Unsupported(profile.name, profile.unsupportedReason))
         case Present(profile) if profile.name == "copilot" =>
           resolveCopilot(config, overrides, profile, aliasModel, aliasKey)
+        case Present(profile) if profile.name == "qwen-oauth" =>
+          resolveQwen(config, overrides, profile, aliasModel, aliasKey)
         case Present(profile) =>
           val baseUrl =
             aliasBaseUrl
@@ -214,6 +216,35 @@ object Runtime:
               Result.fail(ResolveError.KeyCommandFailed("copilot token-exchange", err))
           }.map(Abort.get)
     }
+
+  /** Qwen Portal: use the OAuth access token from `apollo auth qwen login`
+    * (auto-refreshed), targeting the token's `resource_url` endpoint; fall
+    * back to a QWEN_API_KEY. */
+  private def resolveQwen(
+      config: ApolloConfig,
+      overrides: RuntimeOverrides,
+      profile: Profile,
+      aliasModel: Maybe[String],
+      aliasKey: Maybe[String]
+  ): ResolvedRuntime < (Sync & Async & Abort[ResolveError]) =
+    val env   = config.env
+    val model = overrides.model.orElse(aliasModel)
+      .orElse(env.get("APOLLO_INFERENCE_MODEL")).orElse(defaultModel(profile))
+    val envKey = overrides.apiKey.orElse(aliasKey)
+      .orElse(profile.keyEnvVars.foldLeft(Maybe.empty[String])((a, v) => a.orElse(env.get(v))))
+    model match
+      case Absent => Abort.fail(ResolveError.NoModel(profile.name))
+      case Present(m) =>
+        QwenAuth.ensureFresh(config.paths).map { tokOpt =>
+          tokOpt.map(_.accessToken).orElse(envKey) match
+            case Absent =>
+              Abort.fail(ResolveError.NoCredentials("Run `apollo auth qwen login`, or set QWEN_API_KEY."))
+            case Present(key) =>
+              val baseUrl = tokOpt.map(QwenAuth.apiBase).getOrElse(profile.baseUrl)
+              Abort.get(Result.succeed(assemble(config, overrides, profile.name, profile.displayName, m,
+                baseUrl, Present(key), ApiMode.ChatCompletions, profile.defaultHeaders, Present(profile))))
+        }
+  end resolveQwen
 
   private def resolveCustomNamed(
       config: ApolloConfig,
