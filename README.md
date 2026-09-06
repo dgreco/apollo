@@ -35,7 +35,7 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 - **MCP client** — stdio and streamable-HTTP transports, OAuth 2.1 + PKCE, a
   reliability ladder (circuit breaker / keepalive / reconnect / parking), and
   `apollo mcp add|remove|list|test|login|reauth|logout`.
-- **Gateway** — one process hosting Telegram, Discord, Slack, an
+- **Gateway** — one process hosting Telegram, Discord, Slack, Matrix, an
   OpenAI-compatible HTTP API, a generic webhook, and a cron scheduler, with
   optional live-streaming replies.
 - **Agent core** — role-alternation repair, persist-before-execute durability,

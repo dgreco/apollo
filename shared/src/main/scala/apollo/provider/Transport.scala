@@ -21,6 +21,7 @@ object Transport:
   private val streamRoute = HttpRoute.postRaw("").request(_.bodyText).response(_.bodyStream)
   private val textRoute   = HttpRoute.postRaw("").request(_.bodyText).response(_.bodyText)
   private val patchRoute  = HttpRoute.patchRaw("").request(_.bodyText).response(_.bodyText)
+  private val putRoute    = HttpRoute.putRaw("").request(_.bodyText).response(_.bodyText)
   private val getRoute    = HttpRoute.getRaw("").response(_.bodyText)
 
   /** Base headers every provider request carries unless overridden. */
@@ -138,6 +139,30 @@ object Transport:
           HttpClient.withConfig(_.timeout(timeout)) {
             HttpClient.use { client =>
               client.sendWith(patchRoute, req) { resp =>
+                val text = resp.fields.body
+                if resp.status.isSuccess then Result.succeed(text)
+                else Result.fail(ProviderError.Http(resp.status.code, text))
+              }
+            }
+          }
+        }
+      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+
+  /** PUTs `body`, returns the full response text (e.g. Matrix message sends). */
+  def putJson(
+      url: String,
+      headers: List[(String, String)],
+      body: String,
+      timeout: Duration = turnTimeout
+  ): String < (Sync & Async & Abort[ProviderError]) =
+    HttpRequest.putRaw(url) match
+      case Result.Success(base) =>
+        val withHeaders = (baseHeaders ++ headers).foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
+        val req = withHeaders.addField("body", body)
+        liftResult {
+          HttpClient.withConfig(_.timeout(timeout)) {
+            HttpClient.use { client =>
+              client.sendWith(putRoute, req) { resp =>
                 val text = resp.fields.body
                 if resp.status.isSuccess then Result.succeed(text)
                 else Result.fail(ProviderError.Http(resp.status.code, text))

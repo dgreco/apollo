@@ -59,8 +59,10 @@ into a platform. Roughly ordered by value/effort.
 - ~~**Skills Hub**~~ **done (install/search)** — `apollo skills install <git-url|owner/repo|dir>`
   (git clone / local copy) and `apollo skills search <q>` over a catalog
   (`skills.hub_catalog_url`). Ledger/linter/curate still open.
-- **More gateway platforms** — email, SMS, Matrix, WhatsApp, Teams, iMessage, …
-  (Hermes has ~25).
+- **More gateway platforms** — **Matrix done** (HTTP `/sync` long-poll + send,
+  MATRIX_HOMESERVER/MATRIX_ACCESS_TOKEN), alongside Telegram/Discord/Slack. Email
+  (IMAP/SMTP), SMS, WhatsApp, Teams, iMessage remain (non-HTTP or vendor-SDK; out
+  of the current HTTP-only fit, except WhatsApp Cloud/SMS which could follow).
 
 ## Group C — out of apollo's scope (platform, not core agent)
 

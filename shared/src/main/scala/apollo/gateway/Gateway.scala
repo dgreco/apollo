@@ -33,6 +33,8 @@ object Gateway:
     val discord  = env.get("DISCORD_BOT_TOKEN")
     val slackBot = env.get("SLACK_BOT_TOKEN")
     val slackApp = env.get("SLACK_APP_TOKEN")
+    val matrixHs = env.get("MATRIX_HOMESERVER")
+    val matrixTok = env.get("MATRIX_ACCESS_TOKEN")
     val apiKey   = env.get("API_SERVER_KEY")
       .orElse(config.platformConfig("api_server").flatMap(_.path("extra", "key")).flatMap(_.str))
     val apiEnabled = config.platformEnabled("api_server").getOrElse(apiKey.nonEmpty)
@@ -67,25 +69,34 @@ object Gateway:
               Console.printLine("slack: SLACK_BOT_TOKEN set but SLACK_APP_TOKEN missing (Socket Mode needs both)")
                 .andThen(Nil)
             case _ => Nil
+        val matrixServices: List[Unit < (Sync & Async)] < Sync =
+          (matrixHs, matrixTok) match
+            case (Present(hs), Present(tok)) => Matrix.services(hs, tok, config, hub)
+            case (Present(_), Absent) =>
+              Console.printLine("matrix: MATRIX_HOMESERVER set but MATRIX_ACCESS_TOKEN missing").andThen(Nil)
+            case _ => Nil
         telegramServices.map { tg =>
           discordServices.map { dc =>
           slackServices.map { sl =>
-          val platformCount = tg.length + dc.length + sl.length
+          matrixServices.map { mx =>
+          val platformCount = tg.length + dc.length + sl.length + mx.length
             + (if apiEnabled then 1 else 0) + (if webhookEnabled then 1 else 0)
           val services =
-            tg ++ dc ++ sl
+            tg ++ dc ++ sl ++ mx
               ++ (if apiEnabled then List(ApiServer.serve(config, hub, apiKey)) else Nil)
               ++ (if webhookEnabled then List(Webhook.serve(config, hub, webhookSecret)) else Nil)
               ++ List(apollo.cron.Scheduler.runLoop(config, paths))
           if platformCount == 0 then
             Console.printLine(
               "gateway: no platforms configured. Set TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, " +
-                "SLACK_BOT_TOKEN+SLACK_APP_TOKEN, API_SERVER_KEY, or WEBHOOK_SECRET (env or ~/.apollo/.env)."
+                "SLACK_BOT_TOKEN+SLACK_APP_TOKEN, MATRIX_HOMESERVER+MATRIX_ACCESS_TOKEN, API_SERVER_KEY, " +
+                "or WEBHOOK_SECRET (env or ~/.apollo/.env)."
             )
           else
             Console.printLine(s"gateway: starting $platformCount platform(s) + cron scheduler")
               .andThen(mcpStart)
               .andThen(Async.gather(services).unit)
+          }
           }
           }
         }
