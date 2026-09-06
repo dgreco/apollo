@@ -384,6 +384,11 @@ class McpManagerSuite extends munit.FunSuite:
     import AllowUnsafe.embrace.danger
     KyoApp.Unsafe.runAndBlock(30.seconds)(v).getOrThrow
 
+  // Start each test from clean process-global state so a prior suite that left
+  // McpManager.started=true can't silently no-op this suite's start() calls.
+  override def beforeEach(context: BeforeEach): Unit =
+    McpManager.resetState()
+
   override def afterEach(context: AfterEach): Unit =
     run(McpManager.stopAll)
 

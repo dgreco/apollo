@@ -91,6 +91,17 @@ object McpManager:
       started.set(false)
     })
 
+  /** Test hook: clear all process-global state so suites don't leak into each
+    * other (mirrors Slack/Discord.resetState). `start` is guarded by `started`,
+    * so a leaked `started=true` silently no-ops a later start — reset avoids that.
+    * Does not close live clients (tests use short-lived mocks). */
+  def resetState(): Unit =
+    import scala.jdk.CollectionConverters.*
+    servers.values.asScala.foreach(s => ToolRegistry.unregisterDynamic(s"mcp-${s.config.name}"))
+    servers.clear()
+    trustGrants.clear()
+    started.set(false)
+
   private def installShutdownHook(): Unit =
     if hooked.compareAndSet(false, true) then
       java.lang.Runtime.getRuntime.addShutdownHook(new Thread(() =>
