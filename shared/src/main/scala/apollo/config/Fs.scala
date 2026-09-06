@@ -43,6 +43,14 @@ object Fs:
       ()
     }
 
+  def writeBytes(path: Path, bytes: Array[Byte]): Unit < Sync =
+    Sync.defer {
+      val parent = path.getParent
+      if parent != null then Files.createDirectories(parent)
+      Files.write(path, bytes)
+      ()
+    }
+
   /** Write-then-rename so readers never observe a torn file. */
   def writeStringAtomic(path: Path, content: String): Unit < Sync =
     Sync.defer {

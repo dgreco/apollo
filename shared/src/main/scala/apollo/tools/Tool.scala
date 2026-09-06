@@ -100,7 +100,7 @@ object ToolRegistry:
     FileTools.entries ++ TerminalTools.entries ++ TodoTool.entries ++ MemoryTool.entries
       ++ SkillsTools.entries ++ ClarifyTool.entries ++ WebTools.entries ++ CronTool.entries
       ++ SessionSearchTool.entries ++ DelegateTool.entries ++ VisionTool.entries
-      ++ ToolSearchTool.entries
+      ++ ToolSearchTool.entries ++ ImageGen.entries
 
   private lazy val builtinByName: Map[String, ToolEntry] = all.map(t => t.name -> t).toMap
 

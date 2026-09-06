@@ -221,6 +221,15 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
     * while the prompt stays live for /steer, /stop, /queue. JVM/JLine only. */
   def asyncInput: Boolean       = at("display", "async_input").flatMap(_.bool).getOrElse(false)
 
+  // Image generation (`image.*`), used by the image_generate tool. Key falls
+  // back to OPENAI_API_KEY; base/model default to OpenAI's images API.
+  def imageApiKey: Maybe[String] =
+    strAt("image", "api_key").orElse(env.get("IMAGE_API_KEY")).orElse(env.get("OPENAI_API_KEY"))
+  def imageApiBase: String =
+    strAt("image", "api_base").orElse(env.get("IMAGE_API_BASE")).getOrElse("https://api.openai.com/v1")
+  def imageModel: String =
+    strAt("image", "model").orElse(env.get("IMAGE_MODEL")).getOrElse("dall-e-3")
+
   // --- toolsets -----------------------------------------------------------
 
   def platformToolsets(platform: String): Maybe[List[String]] =

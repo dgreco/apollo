@@ -52,8 +52,9 @@ into a platform. Roughly ordered by value/effort.
 
 ## Group B — breadth features (bigger; arguably in-scope)
 
-- Vision analysis (input) is cheap given the wire support; **image/video
-  generation** is a new provider surface.
+- Vision analysis (input) done in Group A. **`image_generate`** done — a tool
+  hitting an OpenAI-compatible `/images/generations` endpoint (`image.*` config),
+  saving the PNG. Video generation still open (niche/heavy).
 - **Browser automation** (multiple backends in Hermes).
 - **Skills Hub** — remote skill install/search/curate, ledger, linter.
 - **More gateway platforms** — email, SMS, Matrix, WhatsApp, Teams, iMessage, …
