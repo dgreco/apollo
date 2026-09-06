@@ -56,6 +56,11 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
       .orElse(strAt("api_base"))
 
   def modelApiKey: Maybe[String]    = strAt("model", "api_key")
+  /** `model.key_cmd`: a command that prints a (usually short-lived) token —
+    * mints credentials for OAuth-token CLIs (`gcloud auth print-access-token`
+    * for Vertex, `az account get-access-token` for Azure Entra, etc.). Applies
+    * to any profile; beaten only by an explicit `--api-key`. */
+  def modelKeyCmd: Maybe[String]    = strAt("model", "key_cmd").filter(_.nonEmpty)
   def modelApiMode: Maybe[String]   = strAt("model", "api_mode").filter(_.nonEmpty)
   def modelStreaming: Boolean       = at("model", "streaming").flatMap(_.bool).getOrElse(true)
   def modelMaxTokens: Maybe[Int]    = at("model", "max_tokens").flatMap(_.int)

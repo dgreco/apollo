@@ -151,11 +151,13 @@ object Runtime:
           val baseUrl =
             aliasBaseUrl
               .orElse(profile.baseUrlEnvVars.foldLeft(Maybe.empty[String])((acc, v) => acc.orElse(env.get(v))))
-              .orElse(if profile.name == "custom" then config.modelBaseUrl else Absent)
+              // `model.base_url` applies to the custom profile, or to any profile
+              // the config explicitly names (parity with the api-key gating).
+              .orElse(config.modelBaseUrl.filter(_ =>
+                profile.name == "custom" || config.modelProvider.exists(p => sameProvider(p, slug))))
               .getOrElse(profile.baseUrl)
-          val apiKey =
-            overrides.apiKey
-              .orElse(aliasKey)
+          val staticKey =
+            aliasKey
               .orElse(config.modelApiKey.filter(_ => config.modelProvider.forall(p => sameProvider(p, slug))))
               .orElse(profile.keyEnvVars.foldLeft(Maybe.empty[String])((acc, v) => acc.orElse(env.get(v))))
           val model =
@@ -168,8 +170,17 @@ object Runtime:
             case Absent => Abort.fail(ResolveError.NoModel(profile.name))
             case Present(m) =>
               val apiMode = resolveApiMode(config, profile, baseUrl, m)
-              Abort.get(Result.succeed(assemble(config, overrides, profile.name, profile.displayName, m,
-                baseUrl, apiKey, apiMode, profile.defaultHeaders, Present(profile))))
+              // Credential precedence: explicit --api-key > model.key_cmd
+              // (short-lived OAuth-CLI token) > static keys (config/env/profile).
+              val keyEff: Maybe[String] < (Sync & Async & Abort[ResolveError]) =
+                overrides.apiKey match
+                  case Present(k) => Present(k)
+                  case Absent => config.modelKeyCmd match
+                    case Present(cmd) => KeyCommand.run(cmd).map(Present(_))
+                    case Absent       => staticKey
+              keyEff.map(apiKey =>
+                assemble(config, overrides, profile.name, profile.displayName, m,
+                  baseUrl, apiKey, apiMode, profile.defaultHeaders, Present(profile)))
   end resolveForSlug
 
   /** Copilot: obtain a GitHub token (stored login, then env), exchange it for a

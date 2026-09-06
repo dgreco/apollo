@@ -83,11 +83,13 @@ class ProfilesSuite extends munit.FunSuite:
   }
 
   test("unsupported providers carry an actionable reason") {
-    // Still unsupported (OAuth brokers / GCP SA minting not implemented).
-    val vertex = Profiles.find("vertex")
-    assert(vertex.exists(_.unsupported))
-    assert(vertex.exists(_.unsupportedReason.nonEmpty))
-    assert(Profiles.find("openai-codex").exists(_.unsupported))
+    // Still unsupported (the ChatGPT OAuth broker / external OAuth flows).
+    val codex = Profiles.find("openai-codex")
+    assert(codex.exists(_.unsupported))
+    assert(codex.exists(_.unsupportedReason.nonEmpty))
+    assert(Profiles.find("minimax-oauth").exists(_.unsupported))
+    // vertex is now supported via model.base_url + model.key_cmd (gcloud token).
+    assert(Profiles.find("vertex").exists(!_.unsupported))
   }
 
   test("bedrock is supported (SigV4 implemented) and offers models") {

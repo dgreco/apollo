@@ -461,8 +461,12 @@ object Profiles:
       name = "vertex",
       aliases = List("google-vertex", "vertex-ai", "gcp-vertex"),
       displayName = "Google Vertex AI",
-      unsupported = true,
-      unsupportedReason = "requires GCP service-account OAuth2 minting, not implemented in apollo"
+      // Vertex's OpenAI-compatible endpoint is project/region-specific: set it
+      // via `model.base_url` (or VERTEX_BASE_URL) and mint the bearer with
+      // `model.key_cmd: gcloud auth print-access-token`.
+      apiMode = ChatCompletions,
+      keyEnvVars = List("GOOGLE_VERTEX_API_KEY", "VERTEX_API_KEY"),
+      baseUrlEnvVars = List("VERTEX_BASE_URL", "GOOGLE_VERTEX_BASE_URL")
     ),
     Profile(
       name = "azure-foundry",
