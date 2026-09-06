@@ -140,6 +140,10 @@ object PlatformEditor:
               buffer.clear(); cursor = 0; redraw()
             case 1 => cursor = 0; redraw()             // Ctrl-A
             case 5 => cursor = buffer.length; redraw() // Ctrl-E
+            case 9 => // TAB — complete the current slash command
+              ReplCommands.tabComplete(buffer.mkString) match
+                case Some(done) => buffer.clear(); buffer ++= done; cursor = buffer.length; redraw()
+                case None       => ()
             case 127 | 8 => // Backspace
               if cursor > 0 then
                 buffer.remove(cursor - 1)

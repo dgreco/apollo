@@ -327,6 +327,29 @@ object ReplCommands:
         val token = rest.toLowerCase
         commandCatalog.filter(c => c.names.exists(_.toLowerCase.startsWith(token)))
 
+  private def longestCommonPrefix(ss: List[String]): String =
+    if ss.isEmpty then ""
+    else ss.reduce { (a, b) =>
+      val n = a.zip(b).takeWhile((x, y) => x == y).length
+      a.take(n)
+    }
+
+  /** What the current slash line should become when TAB is pressed: the sole
+    * matching command completed (with a trailing space, ready for args), or the
+    * longest common prefix of the matches when it adds characters, or None when
+    * there's nothing unambiguous to fill in. */
+  def tabComplete(line: String): Option[String] =
+    if !line.startsWith("/") || line.drop(1).contains(' ') then None
+    else
+      val token = line.drop(1).toLowerCase
+      val hits  = commandCatalog.flatMap(_.names).filter(_.toLowerCase.startsWith(token)).distinct.sorted
+      hits match
+        case Nil        => None
+        case one :: Nil => Some("/" + one + " ")
+        case many =>
+          val lcp = longestCommonPrefix(many)
+          if lcp.length > token.length then Some("/" + lcp) else None
+
   /** A compact menu of matches for the live completion display. */
   def formatMenu(matches: List[CommandInfo], max: Int = 8): List[String] =
     val shown = matches.take(max).map(c => s"  ${("/" + c.name).padTo(18, ' ')} ${c.summary}")

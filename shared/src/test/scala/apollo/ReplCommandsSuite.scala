@@ -197,6 +197,22 @@ class ReplCommandsSuite extends munit.FunSuite:
     assertEquals(ReplCommands.completeSlash("/zzz"), Nil)
   }
 
+  test("tabComplete fills unique matches and common prefixes") {
+    // unique → completed with trailing space
+    assertEquals(ReplCommands.tabComplete("/handof"), Some("/handoff "))
+    assertEquals(ReplCommands.tabComplete("/handoff"), Some("/handoff "))
+    // ambiguous but a longer common prefix exists → extend to it (no space)
+    assertEquals(ReplCommands.tabComplete("/rea"), Some("/reasoning"))
+    // ambiguous with no further common prefix → nothing to fill
+    assertEquals(ReplCommands.tabComplete("/re"), None)
+    // no match, args started, or non-slash → None
+    assertEquals(ReplCommands.tabComplete("/zzz"), None)
+    assertEquals(ReplCommands.tabComplete("/model foo"), None)
+    assertEquals(ReplCommands.tabComplete("hello"), None)
+    // alias completes to the alias text (history is an alias of status)
+    assertEquals(ReplCommands.tabComplete("/hist"), Some("/history "))
+  }
+
   test("catalog has no duplicate names/aliases and formatMenu caps") {
     val all = ReplCommands.commandCatalog.flatMap(_.names)
     assertEquals(all.distinct.length, all.length, s"duplicate command names/aliases: $all")
