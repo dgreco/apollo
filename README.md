@@ -109,6 +109,10 @@ apollo setup      # re-run the wizard any time
 apollo                       # start chatting
 ```
 
+Startup shows a **welcome screen** (ASCII-art title + a framed panel of available
+tools and skills grouped by category, with your model, cwd, and session), and
+each turn ends with a **status line** (model · context usage · tokens · turn time).
+
 Type `/` to see the commands: the native REPL shows a **live menu** that filters
 as you type; on the JVM (JLine) press **TAB** to list/complete. **TAB** completes
 the current command on both (`APOLLO_NO_COMMAND_MENU=1` disables the native menu).

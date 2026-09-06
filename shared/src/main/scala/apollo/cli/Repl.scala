@@ -141,8 +141,13 @@ final class Repl(
     for
       _      <- Sync.defer(editor.onInterrupt(() => interruptFlag.set(true)))
       system <- buildSystem(tools, systemSuffix)
+      t0     <- Sync.defer(java.lang.System.currentTimeMillis())
       result <- agent.runTurn(buildUserMsg(input), system, tools, callbacks)
       _      <- Console.printLine("")
+      _      <- Sync.defer(java.lang.System.currentTimeMillis()).map(now =>
+                  Console.printLine(Style.dim(StatusBar.render(
+                    runtime.model, agent.lastPromptTokenCount, runtime.contextLength.getOrElse(0),
+                    result.usage.inputTokens, result.usage.outputTokens, now - t0))))
       _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
                   Console.printLine(Style.red(s"· ${result.exitReason}"))
