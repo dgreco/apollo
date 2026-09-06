@@ -35,6 +35,8 @@ object Gateway:
     val slackApp = env.get("SLACK_APP_TOKEN")
     val matrixHs = env.get("MATRIX_HOMESERVER")
     val matrixTok = env.get("MATRIX_ACCESS_TOKEN")
+    val whatsappTok = env.get("WHATSAPP_TOKEN")
+    val twilioSid   = env.get("TWILIO_ACCOUNT_SID")
     val apiKey   = env.get("API_SERVER_KEY")
       .orElse(config.platformConfig("api_server").flatMap(_.path("extra", "key")).flatMap(_.str))
     val apiEnabled = config.platformEnabled("api_server").getOrElse(apiKey.nonEmpty)
@@ -75,22 +77,31 @@ object Gateway:
             case (Present(_), Absent) =>
               Console.printLine("matrix: MATRIX_HOMESERVER set but MATRIX_ACCESS_TOKEN missing").andThen(Nil)
             case _ => Nil
+        val whatsappServices: List[Unit < (Sync & Async)] =
+          whatsappTok match
+            case Present(_) => WhatsApp.services(config, hub)
+            case Absent     => Nil
+        val smsServices: List[Unit < (Sync & Async)] =
+          twilioSid match
+            case Present(_) => Sms.services(config, hub)
+            case Absent     => Nil
         telegramServices.map { tg =>
           discordServices.map { dc =>
           slackServices.map { sl =>
           matrixServices.map { mx =>
-          val platformCount = tg.length + dc.length + sl.length + mx.length
+          val platformCount = tg.length + dc.length + sl.length + mx.length +
+            whatsappServices.length + smsServices.length
             + (if apiEnabled then 1 else 0) + (if webhookEnabled then 1 else 0)
           val services =
-            tg ++ dc ++ sl ++ mx
+            tg ++ dc ++ sl ++ mx ++ whatsappServices ++ smsServices
               ++ (if apiEnabled then List(ApiServer.serve(config, hub, apiKey)) else Nil)
               ++ (if webhookEnabled then List(Webhook.serve(config, hub, webhookSecret)) else Nil)
               ++ List(apollo.cron.Scheduler.runLoop(config, paths))
           if platformCount == 0 then
             Console.printLine(
               "gateway: no platforms configured. Set TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, " +
-                "SLACK_BOT_TOKEN+SLACK_APP_TOKEN, MATRIX_HOMESERVER+MATRIX_ACCESS_TOKEN, API_SERVER_KEY, " +
-                "or WEBHOOK_SECRET (env or ~/.apollo/.env)."
+                "SLACK_BOT_TOKEN+SLACK_APP_TOKEN, MATRIX_HOMESERVER+MATRIX_ACCESS_TOKEN, WHATSAPP_TOKEN, " +
+                "TWILIO_ACCOUNT_SID, API_SERVER_KEY, or WEBHOOK_SECRET (env or ~/.apollo/.env)."
             )
           else
             Console.printLine(s"gateway: starting $platformCount platform(s) + cron scheduler")
