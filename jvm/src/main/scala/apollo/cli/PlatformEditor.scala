@@ -99,6 +99,10 @@ object PlatformEditor:
     // JLine's supported way to emit output above an active readLine (called from
     // the turn fiber while the main fiber is blocked in readLine).
     def printAbove(text: String): Unit < Sync = Sync.defer { reader.printAbove(text); () }
+
+    override def terminalWidth: Int < Sync = Sync.defer {
+      val w = terminal.getWidth; if w > 0 then w else 0
+    }
   end JLineEditor
 
   private object FallbackEditor extends LineEditor:

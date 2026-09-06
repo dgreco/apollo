@@ -28,3 +28,7 @@ trait LineEditor:
     * editors fall back to a plain `println`.
     */
   def printAbove(text: String): Unit < Sync
+
+  /** Terminal width in columns, or 0 when unknown (non-TTY / undetectable).
+    * Used to size the full-width status bar. */
+  def terminalWidth: Int < Sync = Sync.defer(0)

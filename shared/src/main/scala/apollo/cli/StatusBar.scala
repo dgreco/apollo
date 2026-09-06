@@ -41,4 +41,40 @@ object StatusBar:
     val r = rate(outTok, turnMs)
     val rateStr = if r > 0 then s" · ${r} t/s" else ""
     s"$model · $ctx · ${human(inTok)} in / ${human(outTok)} out$rateStr · ${secs(turnMs)}"
+
+  /** The full bottom status bar, modeled on Hermes: `‡ model │ used/win │
+    * gauge % │ ⊙ time │ ↑ rate t/s` on the left, and (when `width` is known) a
+    * right-aligned `— title` padded to fill the line. `colored` styles the
+    * model gold and the rest dim. */
+  def bar(width: Int, model: String, ctxTokens: Long, ctxWindow: Int,
+          inTok: Long, outTok: Long, turnMs: Long, title: String, colored: Boolean = true): String =
+    def gold(s: String) = if colored then Style.gold(s) else s
+    def dim(s: String)  = if colored then Style.dim(s) else s
+    val segs = scala.collection.mutable.ListBuffer[String]()
+    segs += gold(s"‡ $model")
+    if ctxWindow > 0 then
+      val pct = ctxTokens * 100L / ctxWindow.toLong
+      segs += dim(s"${human(ctxTokens)}/${human(ctxWindow.toLong)}")
+      segs += dim(s"${gauge(ctxTokens.toDouble / ctxWindow, 6)} $pct%")
+    else segs += dim(s"${human(ctxTokens)} ctx")
+    if turnMs > 0 then segs += dim(s"⊙ ${secs(turnMs)}")
+    val r = rate(outTok, turnMs)
+    if r > 0 then segs += dim(s"↑ $r t/s")
+    val sep   = dim(" │ ")
+    val right = if title.trim.nonEmpty then gold(s"— ${title.trim}") else ""
+    val rightW = Banner.plainWidth(right)
+    def joined(ss: List[String]) = ss.mkString(sep)
+    if width <= 0 then
+      val left = joined(segs.toList)
+      if right.isEmpty then left else s"$left   $right"
+    else
+      // Drop trailing segments until the left side fits the width.
+      var kept = segs.toList
+      while kept.length > 1 && Banner.plainWidth(joined(kept)) > width do kept = kept.dropRight(1)
+      val left  = joined(kept)
+      val leftW = Banner.plainWidth(left)
+      if right.nonEmpty && leftW + rightW + 1 <= width then
+        left + (" " * (width - leftW - rightW)) + right // right-aligned, padded to width
+      else if leftW <= width then left
+      else left // single oversized segment on a very narrow terminal — leave as-is
 end StatusBar
