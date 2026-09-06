@@ -581,7 +581,7 @@ final class Repl(
           else Console.printLine(s"no card $id")
         }.andThen(true)
       case _ =>
-        Console.printLine("usage: /kanban [show | add <todo|doing|done> <text> | move <id> <col> | rm <id>]").andThen(true)
+        Console.printLine(s"usage: /kanban [show | add <${ReplCommands.kanbanColumns.mkString("|")}> <text> | move <id> <col> | rm <id>]").andThen(true)
 
   // --- /curator: skill maintenance — list / archive / restore ----------------
 

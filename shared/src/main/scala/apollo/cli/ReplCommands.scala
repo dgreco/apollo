@@ -221,28 +221,16 @@ object ReplCommands:
     if bs.isEmpty then "no blueprints"
     else bs.map(b => s"${b.name}  —  ${b.description}  (${b.schedule})").mkString("\n")
 
-  // --- /kanban: a local board (columns of cards over a text file) -----------
+  // --- /kanban: the local board, backed by the shared apollo.tools.KanbanBoard
+  // (so the REPL and the agent-facing `kanban` tool share one board file). -----
 
-  val kanbanColumns: List[String] = List("todo", "doing", "done")
+  type KanbanCard = apollo.tools.KanbanBoard.Card
+  val KanbanCard  = apollo.tools.KanbanBoard.Card
+  val kanbanColumns: List[String] = apollo.tools.KanbanBoard.columns
 
-  final case class KanbanCard(id: String, col: String, text: String)
-
-  def renderBoardFile(cards: List[KanbanCard]): String =
-    cards.map(c => s"${c.col}\t${c.id}\t${c.text.replace('\t', ' ').replace('\n', ' ')}").mkString("\n")
-
-  def parseBoard(s: String): List[KanbanCard] =
-    s.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>
-      line.split("\t", 3) match
-        case Array(col, id, text) => Some(KanbanCard(id, col, text))
-        case _                    => None
-    }.toList
-
-  def renderBoard(cards: List[KanbanCard]): String =
-    kanbanColumns.map { col =>
-      val items = cards.filter(_.col == col)
-      val body  = if items.isEmpty then "  (empty)" else items.map(c => s"  [${c.id}] ${c.text}").mkString("\n")
-      s"$col:\n$body"
-    }.mkString("\n")
+  def renderBoardFile(cards: List[KanbanCard]): String = apollo.tools.KanbanBoard.renderFile(cards)
+  def parseBoard(s: String): List[KanbanCard]          = apollo.tools.KanbanBoard.parse(s)
+  def renderBoard(cards: List[KanbanCard]): String     = apollo.tools.KanbanBoard.renderBoard(cards)
 
   // --- command catalog: the single source of truth for /help and completion --
 

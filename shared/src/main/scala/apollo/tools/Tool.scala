@@ -101,7 +101,7 @@ object ToolRegistry:
       ++ SkillsTools.entries ++ ClarifyTool.entries ++ WebTools.entries ++ CronTool.entries
       ++ SessionSearchTool.entries ++ DelegateTool.entries ++ VisionTool.entries
       ++ ToolSearchTool.entries ++ ImageGen.entries ++ BrowserTool.entries ++ VideoGen.entries
-      ++ VoiceTools.entries
+      ++ VoiceTools.entries ++ KanbanTool.entries
 
   private lazy val builtinByName: Map[String, ToolEntry] = all.map(t => t.name -> t).toMap
 

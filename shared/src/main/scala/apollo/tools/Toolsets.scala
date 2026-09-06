@@ -51,6 +51,7 @@ object Toolsets:
     "video_gen"      -> Def("Generate videos from prompts", List("video_generate")),
     "tts"            -> Def("Synthesize speech from text", List("text_to_speech")),
     "stt"            -> Def("Transcribe audio to text", List("transcribe")),
+    "kanban"         -> Def("A local task board", List("kanban")),
     "browser"        -> Def("Drive a headless Chrome (navigate, read, click, screenshot)", List("browser")),
     // Composite / scenario toolsets
     "debugging" -> Def("Troubleshooting bundle", Nil, List("terminal", "web", "file")),
