@@ -27,6 +27,8 @@ object PlatformEditor:
   private val SaveCur  = s"${Esc}7"      // DECSC save cursor
   private val RestCur  = s"${Esc}8"      // DECRC restore cursor
   private def back(n: Int) = s"$Esc[${n}D" // move cursor left n columns
+  private val Dim      = s"$Esc[2m"      // dim text
+  private val Rst      = s"$Esc[0m"      // reset attributes
 
   def create: LineEditor < Sync =
     Sync.defer {
@@ -113,9 +115,11 @@ object PlatformEditor:
           val sb = new StringBuilder
           sb.append("\r").append(ClrBelow).append(prompt).append(shown)
           if menu.nonEmpty then
-            sb.append(SaveCur)
-            menu.foreach(l => sb.append("\n").append(l))
-            sb.append(RestCur)
+            sb.append(SaveCur)                                           // save cursor at input-line end
+            sb.append("\n").append(s"$Dim  ╭─ commands ─ Tab completes · Enter runs$Rst")
+            menu.foreach(l => sb.append("\n").append(s"$Dim  │$Rst").append(l))
+            sb.append("\n").append(s"$Dim  ╰─$Rst")
+            sb.append(RestCur)                                          // back to input-line end
           if b > 0 then sb.append(back(b))
           print(sb.toString)
           java.lang.System.out.flush()
@@ -144,6 +148,13 @@ object PlatformEditor:
               ReplCommands.tabComplete(buffer.mkString) match
                 case Some(done) => buffer.clear(); buffer ++= done; cursor = buffer.length; redraw()
                 case None       => ()
+            case 11 => // Ctrl-K — kill from the cursor to end of line
+              if cursor < buffer.length then
+                buffer.remove(cursor, buffer.length - cursor)
+                redraw()
+            case 16 => // Ctrl-P — open the command palette (all commands in the window below)
+              if buffer.isEmpty then { buffer += '/'; cursor = 1 }
+              redraw()
             case 127 | 8 => // Backspace
               if cursor > 0 then
                 buffer.remove(cursor - 1)
