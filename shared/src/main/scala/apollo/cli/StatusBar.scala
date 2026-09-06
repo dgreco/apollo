@@ -1,12 +1,14 @@
 package apollo.cli
 
-/** The per-turn status line shown after each response — model, context-window
-  * usage, token counts, and turn time — modeled on the Hermes status bar.
+/** The status bar shown above the prompt — model, context-window usage, token
+  * counts, token rate, and turn time — modeled on the Hermes bottom bar.
   *
   * Pure and Native-safe: numbers are humanized without java.util.Formatter
   * (which misbehaves on Scala Native).
   */
 object StatusBar:
+
+  private val ESC = "\u001b"
 
   /** Compact number: 1234 → "1.2k", 2_000_000 → "2.0M", 500 → "500". */
   def human(n: Long): String =
@@ -29,8 +31,7 @@ object StatusBar:
   def rate(outTok: Long, turnMs: Long): Long =
     if turnMs > 0 then outTok * 1000L / turnMs else 0L
 
-  /** The status line body (caller applies dim styling) — model · context gauge ·
-    * tokens · token-rate · turn time. Modeled on the Hermes bottom bar. */
+  /** The plain status line body — model · context gauge · tokens · rate · time. */
   def render(model: String, ctxTokens: Long, ctxWindow: Int,
              inTok: Long, outTok: Long, turnMs: Long): String =
     val ctx =
@@ -44,13 +45,13 @@ object StatusBar:
 
   /** The full bottom status bar, modeled on Hermes: `‡ model │ used/win │
     * gauge % │ ⊙ time │ ↑ rate t/s` on the left, and (when `width` is known) a
-    * right-aligned `— title` padded to fill the line. `colored` styles the
-    * model gold and the rest dim. */
+    * right-aligned highlighted `— title`, on a full-width dark background. */
   def bar(width: Int, model: String, ctxTokens: Long, ctxWindow: Int,
           inTok: Long, outTok: Long, turnMs: Long, title: String, colored: Boolean = true): String =
-    // Truecolor to match the welcome banner (gold #FFD700 / dim gold #B8860B).
-    def gold(s: String) = if colored then s"\u001b[1;38;2;255;215;0m$s\u001b[0m" else s
-    def dim(s: String)  = if colored then s"\u001b[38;2;184;134;11m$s\u001b[0m" else s
+    // Foreground-only resets ([39m / [22;39m) so the background persists across
+    // segments; the whole line is wrapped in a dark bg further down.
+    def gold(s: String) = if colored then s"$ESC[1;38;2;255;215;0m$s$ESC[22;39m" else s
+    def dim(s: String)  = if colored then s"$ESC[38;2;184;134;11m$s$ESC[39m" else s
     val m = model.split("/").last // short model, like the banner
     val segs = scala.collection.mutable.ListBuffer[String]()
     segs += gold(s"‡ $m")
@@ -62,21 +63,29 @@ object StatusBar:
     if turnMs > 0 then segs += dim(s"⊙ ${secs(turnMs)}")
     val r = rate(outTok, turnMs)
     if r > 0 then segs += dim(s"↑ $r t/s")
-    val sep   = dim(" │ ")
-    val right = if title.trim.nonEmpty then gold(s"— ${title.trim}") else ""
-    val rightW = Banner.plainWidth(right)
+    val sep = dim(" │ ")
     def joined(ss: List[String]) = ss.mkString(sep)
+
+    // Right-aligned title, highlighted (gold bg, black text) like Hermes.
+    val titleTxt = title.trim
+    val right =
+      if titleTxt.isEmpty then ""
+      else if colored then s"$ESC[48;2;255;215;0m$ESC[38;2;0;0;0m — $titleTxt $ESC[49;39m"
+      else s"— $titleTxt"
+    val rightW = Banner.plainWidth(right)
+
     if width <= 0 then
       val left = joined(segs.toList)
       if right.isEmpty then left else s"$left   $right"
     else
-      // Drop trailing segments until the left side fits the width.
       var kept = segs.toList
       while kept.length > 1 && Banner.plainWidth(joined(kept)) > width do kept = kept.dropRight(1)
       val left  = joined(kept)
       val leftW = Banner.plainWidth(left)
-      if right.nonEmpty && leftW + rightW + 1 <= width then
-        left + (" " * (width - leftW - rightW)) + right // right-aligned, padded to width
-      else if leftW <= width then left
-      else left // single oversized segment on a very narrow terminal — leave as-is
+      val content =
+        if right.nonEmpty && leftW + rightW + 1 <= width then
+          left + (" " * (width - leftW - rightW)) + right
+        else if leftW < width then left + (" " * (width - leftW)) // fill the bar even without a title
+        else left
+      if colored then s"$ESC[48;2;40;40;44m$content$ESC[0m" else content
 end StatusBar

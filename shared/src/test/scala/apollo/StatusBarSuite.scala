@@ -1,6 +1,6 @@
 package apollo
 
-import apollo.cli.StatusBar
+import apollo.cli.{StatusBar, Banner}
 
 class StatusBarSuite extends munit.FunSuite:
 
@@ -66,5 +66,11 @@ class StatusBarSuite extends munit.FunSuite:
     // narrow width → title truncated with an ellipsis, still fits
     val nar = StatusBar.bar(50, "model-x", 100, 200000, 1, 2, 100, "a very long session title here", colored = false)
     assert(nar.length <= 50, s"overflow: len=${nar.length} [$nar]")
+    // colored: full-width dark background + highlighted right title
+    val c = StatusBar.bar(120, "deepseek/deepseek-v4-flash", 13800, 1000000, 4200, 980, 8700, "Friendly greeting", colored = true)
+    assert(c.contains("[48;2;40;40;44m"), "dark background")
+    assert(c.contains("[1;38;2;255;215;0m"), "gold model")
+    assert(c.contains("[48;2;255;215;0m"), "highlighted title bg")
+    assert(Banner.plainWidth(c) == 120, s"visible width ${Banner.plainWidth(c)} != 120")
   }
 end StatusBarSuite

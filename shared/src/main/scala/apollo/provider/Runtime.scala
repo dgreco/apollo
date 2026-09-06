@@ -317,7 +317,7 @@ object Runtime:
       profile = profile,
       reasoning = resolveReasoning(config, overrides, model, slug),
       maxTokens = config.modelMaxTokens.orElse(profile.flatMap(_.defaultMaxTokens)),
-      contextLength = config.contextLength,
+      contextLength = config.contextLength.orElse(ModelContext.windowFor(model)),
       streaming = config.modelStreaming
     )
 
