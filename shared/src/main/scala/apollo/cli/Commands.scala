@@ -3,7 +3,7 @@ package apollo.cli
 import apollo.config.{Fs, ApolloConfig, ApolloPaths}
 import apollo.config.Yaml.*
 import apollo.cron.CronStore
-import apollo.provider.{Profiles, ResolveError, Runtime, RuntimeOverrides}
+import apollo.provider.{CopilotAuth, Profiles, ResolveError, Runtime, RuntimeOverrides}
 import apollo.session.SessionStore
 import apollo.skills.SkillStore
 import apollo.tools.Toolsets
@@ -247,4 +247,43 @@ object Commands:
                    |${user.getOrElse("(empty)")}""".stripMargin
               )
     yield ()
+
+  /** `apollo auth copilot [login|status|logout]` — GitHub Copilot OAuth. */
+  def auth(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    args.commandArgs match
+      case "copilot" :: rest =>
+        rest.headOption.getOrElse("login") match
+          case "logout" => CopilotAuth.logout(paths).andThen(Console.printLine("copilot: logged out"))
+          case "status" =>
+            CopilotAuth.loadGithubToken(paths).map {
+              case Present(_) => Console.printLine("copilot: a GitHub token is stored (chat with -m copilot:<model>)")
+              case Absent     => Console.printLine("copilot: not logged in (run `apollo auth copilot login`)")
+            }
+          case _ => copilotLogin(paths)
+      case _ =>
+        Console.printLine("usage: apollo auth copilot [login|status|logout]")
+
+  private def copilotLogin(paths: ApolloPaths): Unit < (Sync & Async) =
+    CopilotAuth.deviceStart().map {
+      case Result.Failure(err) => Console.printLine(Style.red(s"copilot login failed: $err"))
+      case Result.Success(dc) =>
+        Console.printLine(
+          s"""To authorize apollo for GitHub Copilot:
+             |  1. open ${dc.verificationUri}
+             |  2. enter the code:  ${Style.bold(dc.userCode)}
+             |waiting…""".stripMargin
+        ).andThen(copilotPoll(paths, dc, dc.interval, dc.expiresIn))
+    }
+
+  private def copilotPoll(paths: ApolloPaths, dc: CopilotAuth.DeviceCode, interval: Int, remaining: Int): Unit < (Sync & Async) =
+    if remaining <= 0 then Console.printLine(Style.red("copilot login timed out; try again"))
+    else
+      Async.sleep(interval.seconds).andThen(CopilotAuth.pollOnce(dc.deviceCode)).map {
+        case CopilotAuth.Poll.Pending      => copilotPoll(paths, dc, interval, remaining - interval)
+        case CopilotAuth.Poll.SlowDown     => copilotPoll(paths, dc, interval + 5, remaining - interval)
+        case CopilotAuth.Poll.Error(msg)   => Console.printLine(Style.red(s"copilot login failed: $msg"))
+        case CopilotAuth.Poll.Success(tok) =>
+          CopilotAuth.saveGithubToken(paths, tok).andThen(
+            Console.printLine(Style.green("copilot: logged in — use  -m copilot:<model>  (e.g. copilot:gpt-4o)")))
+      }
 end Commands

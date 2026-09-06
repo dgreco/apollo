@@ -145,6 +145,8 @@ object Runtime:
         case Absent => Abort.fail(ResolveError.UnknownProvider(slug))
         case Present(profile) if profile.unsupported =>
           Abort.fail(ResolveError.Unsupported(profile.name, profile.unsupportedReason))
+        case Present(profile) if profile.name == "copilot" =>
+          resolveCopilot(config, overrides, profile, aliasModel, aliasKey)
         case Present(profile) =>
           val baseUrl =
             aliasBaseUrl
@@ -169,6 +171,38 @@ object Runtime:
               Abort.get(Result.succeed(assemble(config, overrides, profile.name, profile.displayName, m,
                 baseUrl, apiKey, apiMode, profile.defaultHeaders, Present(profile))))
   end resolveForSlug
+
+  /** Copilot: obtain a GitHub token (stored login, then env), exchange it for a
+    * short-lived Copilot bearer, and assemble a ChatCompletions runtime with the
+    * Copilot headers. The bearer is minted per resolve (session start); a very
+    * long session may outlive it and need a re-login. */
+  private def resolveCopilot(
+      config: ApolloConfig,
+      overrides: RuntimeOverrides,
+      profile: Profile,
+      aliasModel: Maybe[String],
+      aliasKey: Maybe[String]
+  ): ResolvedRuntime < (Sync & Async & Abort[ResolveError]) =
+    val env = config.env
+    CopilotAuth.loadGithubToken(config.paths).map { stored =>
+      val ghToken = overrides.apiKey.orElse(aliasKey).orElse(stored)
+        .orElse(profile.keyEnvVars.foldLeft(Maybe.empty[String])((a, v) => a.orElse(env.get(v))))
+      val model = overrides.model.orElse(aliasModel)
+        .orElse(env.get("APOLLO_INFERENCE_MODEL")).orElse(defaultModel(profile))
+      (ghToken, model) match
+        case (Absent, _) =>
+          Abort.fail(ResolveError.NoCredentials("Run `apollo auth copilot login`, or set GH_TOKEN/GITHUB_TOKEN."))
+        case (_, Absent) => Abort.fail(ResolveError.NoModel(profile.name))
+        case (Present(gh), Present(m)) =>
+          CopilotAuth.exchange(gh).map {
+            case Result.Success(tok) =>
+              Result.succeed(assemble(config, overrides, profile.name, profile.displayName, m,
+                profile.baseUrl, Present(tok.token), ApiMode.ChatCompletions,
+                profile.defaultHeaders ++ CopilotAuth.headers, Present(profile)))
+            case Result.Failure(err) =>
+              Result.fail(ResolveError.KeyCommandFailed("copilot token-exchange", err))
+          }.map(Abort.get)
+    }
 
   private def resolveCustomNamed(
       config: ApolloConfig,

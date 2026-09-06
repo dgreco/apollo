@@ -45,7 +45,7 @@ into a platform. Roughly ordered by value/effort.
 | ~~**`tool_search`**~~ | **Done** — keyword search over all registered tools (built-in + MCP); `tool_search` toolset. |
 | **Background auto-review** | Hermes forks an agent after each turn to *actually save* skills/memory; apollo's nudges only *remind*. |
 | ~~**MCP: sampling + elicitation**~~ | **Done (stdio)** — server-initiated `sampling/createMessage` (runs a model call) and `elicitation/create` (asks the user / declines) handled by `McpClient`. Still open: same for the **HTTP** transport, **MCP server mode**, legacy **SSE**. |
-| **Provider OAuth** | Copilot, ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini `generateContent`, and the **MoA** virtual provider — apollo currently marks these unsupported. |
+| ~~**Provider OAuth**~~ | **Copilot done** — `apollo auth copilot login` (OAuth device-code) + GitHub→Copilot token exchange; `copilot` is now a resolvable provider. ⚠️ Reverse-engineered constants; the live flow needs hands-on validation. Still unsupported: ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini, MoA. |
 | ~~**Bedrock streaming**~~ | **Done** — `ConverseStream` decoded via `apollo.util.EventStream`; selected by `model.streaming`. |
 | **Guards** | repetition guard, empty-response guard, prompt-cache boundary management. |
 | **More terminal backends** | Hermes has 7 (local/docker/ssh + singularity/modal/daytona/vercel-sandbox); apollo has 3. |
@@ -74,11 +74,14 @@ pursued unless apollo's remit changes from "core agent" to "platform".
 
 ---
 
-## Recommended order
+## Group A status
 
-`vision_analyze` → MCP sampling/elicitation + server mode → `tool_search` →
-`execute_code` → Bedrock streaming → provider OAuth (Copilot + native Gemini
-first). Everything in Group C stays out of scope by default.
+**All Group-A items are now built** (each CI-green, JVM + Native): `vision_analyze`,
+Bedrock ConverseStream streaming, `execute_code`, `tool_search`, MCP
+sampling/elicitation (stdio), and Copilot OAuth. Remaining follow-ups noted inline
+above: MCP HTTP server-requests + server mode + legacy SSE; the other OAuth
+providers; and Bedrock/Copilot live validation. Group B and Group C are unchanged
+(breadth / out-of-scope).
 
 ## Method / reproducing this audit
 

@@ -438,9 +438,9 @@ object Profiles:
       aliases = List("github-copilot", "github-models", "github-model", "github"),
       displayName = "GitHub Copilot",
       baseUrl = "https://api.githubcopilot.com",
-      keyEnvVars = List("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"),
-      unsupported = true,
-      unsupportedReason = "requires the Copilot token-exchange flow, not implemented in apollo"
+      // The GitHub token (from `apollo auth copilot login`, or one of these env
+      // vars) is exchanged for a short-lived Copilot bearer at resolve time.
+      keyEnvVars = List("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
     ),
     Profile(
       name = "bedrock",

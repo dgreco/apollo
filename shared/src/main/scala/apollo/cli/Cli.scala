@@ -72,6 +72,7 @@ object Cli:
       case "tools"    => Commands.tools(config)
       case "gateway"  => apollo.gateway.Gateway.command(args.commandArgs, config, paths)
       case "mcp"      => Commands.mcp(args, config, paths)
+      case "auth"     => Commands.auth(args, config, paths)
       case "memory"   => Commands.memory(paths)
       case "logs"     => Console.printLine(s"session transcripts: ${paths.home.resolve("scala-state").resolve("sessions")}")
       case "version"  => Console.printLine(s"apollo $version")
