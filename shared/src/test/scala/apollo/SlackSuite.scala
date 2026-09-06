@@ -109,9 +109,13 @@ class SlackSuite extends munit.FunSuite:
             Slack.services("xoxb-test", "xapp-test", config, hub).map { fibers =>
               Kyo.foreach(fibers)(f => Fiber.initUnscoped(f)).map { _ =>
                 import scala.jdk.CollectionConverters.*
+                // Wait for ALL posts the assertions below check (the old condition
+                // returned after a single D100 post, racing the second one).
                 def settled: Boolean =
-                  val ch = posts.asScala.toList.map(_._1)
-                  ch.count(_ == "D100") >= 1 && ch.contains("C200")
+                  val b = posts.asScala.toList
+                  b.contains(("D100", "pong")) &&
+                    b.contains(("C200", "pong")) &&
+                    b.exists((ch, t) => ch == "D100" && t.startsWith("Not authorized"))
                 def await(ms: Long): Unit < (Sync & Async) =
                   if settled || ms <= 0 then () else Async.sleep(100.millis).andThen(await(ms - 100))
                 await(20000)
