@@ -53,6 +53,7 @@ final class Agent(
   // --- per-turn loop guards (reset in runTurn) ----------------------------
   private var recentSignatures = List.empty[String]
   private var emptyRetriesUsed = 0
+  private var checkpointedThisTurn = false
 
   private var sid           = sessionId
   private var forceCompress = false
@@ -97,6 +98,7 @@ final class Agent(
     interruptFlag.set(false)
     recentSignatures = Nil
     emptyRetriesUsed = 0
+    checkpointedThisTurn = false
     val settings = nudgeSettings(toolNames)
     // Lazily hydrate the nudge cadence from restored history on the first turn
     // (Hermes parity), now that the toolset is known.
@@ -205,6 +207,28 @@ final class Agent(
   end loop
 
   private def runToolRound(
+      toolUses: List[Content.ToolUse],
+      callbacks: TurnCallbacks
+  ): List[Content.ToolResult] < (Sync & Async) =
+    maybeCheckpoint(toolUses, callbacks).andThen(executeToolRound(toolUses, callbacks))
+
+  /** Auto-checkpoint the working tree before the first file-mutating tool call
+    * of a turn (Hermes-style, gated by `checkpoints.enabled`). Fail-open. */
+  private def maybeCheckpoint(
+      toolUses: List[Content.ToolUse], callbacks: TurnCallbacks
+  ): Unit < (Sync & Async) =
+    if !config.checkpointsEnabled || checkpointedThisTurn ||
+      !toolUses.exists(tu => apollo.tools.Checkpoint.mutatingTools.contains(tu.name)) then Sync.defer(())
+    else
+      checkpointedThisTurn = true
+      Sync.defer(java.time.Instant.now().toEpochMilli.toString).map { id =>
+        apollo.tools.Checkpoint.create(toolCtx.cwd, id).map {
+          case Result.Success(_) => callbacks.onStatus(s"checkpoint $id")
+          case _                 => Sync.defer(()) // not a git repo / no commits — silent
+        }
+      }
+
+  private def executeToolRound(
       toolUses: List[Content.ToolUse],
       callbacks: TurnCallbacks
   ): List[Content.ToolResult] < (Sync & Async) =

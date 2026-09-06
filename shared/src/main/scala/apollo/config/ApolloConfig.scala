@@ -132,6 +132,9 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   /** `browser.enabled`: allow the `browser` tool to launch a headless Chrome
     * (an already-running CDP endpoint via CHROME_CDP_URL works regardless). */
   def browserEnabled: Boolean     = at("browser", "enabled").flatMap(_.bool).getOrElse(false)
+  /** `checkpoints.enabled`: auto-snapshot the git working tree (as a shadow ref)
+    * before the first file-mutating tool call each turn. Opt-in (Hermes parity). */
+  def checkpointsEnabled: Boolean = at("checkpoints", "enabled").flatMap(_.bool).getOrElse(false)
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)

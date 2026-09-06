@@ -621,17 +621,10 @@ final class Repl(
 
   // --- /rollback: git working-tree checkpoints (manual create + restore) -----
 
-  /** Snapshot the working tree (tracked + newly-added) into a ref without
-    * touching the index/HEAD/working tree, via a throwaway index. */
+  /** Snapshot the working tree into a shadow ref (shared with the agent's
+    * automatic pre-edit checkpointing). */
   private def createCkptCmd(id: String): String =
-    "cd " + q(toolCtx.cwd.toString) + " && " +
-      "idx=$(git rev-parse --git-path index) && " +
-      "tmpidx=$(mktemp) && cp \"$idx\" \"$tmpidx\" 2>/dev/null || true; " +
-      "GIT_INDEX_FILE=\"$tmpidx\" git add -A && " +
-      "tree=$(GIT_INDEX_FILE=\"$tmpidx\" git write-tree) && " +
-      "commit=$(git commit-tree \"$tree\" -p HEAD -m 'apollo checkpoint') && " +
-      "git update-ref refs/apollo/ckpt/" + id + " \"$commit\" && " +
-      "rm -f \"$tmpidx\""
+    apollo.tools.Checkpoint.createScript(toolCtx.cwd.toString, id)
 
   private def captureCkpts: List[(String, String)] < (Sync & Async) =
     sh(s"cd ${q(toolCtx.cwd.toString)} && " +
