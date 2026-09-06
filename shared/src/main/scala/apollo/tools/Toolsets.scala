@@ -48,6 +48,7 @@ object Toolsets:
     "code_execution" -> Def("Run code snippets", List("execute_code")),
     "tool_search"    -> Def("Discover available tools by keyword", List("tool_search")),
     "image_gen"      -> Def("Generate images from prompts", List("image_generate")),
+    "video_gen"      -> Def("Generate videos from prompts", List("video_generate")),
     "browser"        -> Def("Drive a headless Chrome (navigate, read, click, screenshot)", List("browser")),
     // Composite / scenario toolsets
     "debugging" -> Def("Troubleshooting bundle", Nil, List("terminal", "web", "file")),

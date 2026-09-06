@@ -236,6 +236,32 @@ object Transport:
         }
       case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
 
+  private val getBytesRoute = HttpRoute.getRaw("").response(_.bodyStream)
+
+  /** GET returning the raw response bytes (binary downloads — e.g. a rendered
+    * video file). Non-2xx surfaces as `ProviderError.Http` with the body text. */
+  def getBytes(
+      url: String,
+      headers: List[(String, String)],
+      timeout: Duration = turnTimeout
+  ): Array[Byte] < (Sync & Async & Abort[ProviderError]) =
+    HttpRequest.getRaw(url) match
+      case Result.Success(base) =>
+        val req = headers.foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
+        liftResult {
+          HttpClient.withConfig(_.timeout(timeout)) {
+            HttpClient.use { client =>
+              client.sendWith(getBytesRoute, req) { resp =>
+                collectBytes(resp.fields.body).map { bytes =>
+                  if resp.status.isSuccess then Result.succeed(bytes)
+                  else Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+                }
+              }
+            }
+          }
+        }
+      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+
   // -----------------------------------------------------------------------
 
   private def withRequest[A](url: String, headers: List[(String, String)], body: String)(

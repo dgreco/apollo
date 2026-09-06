@@ -279,6 +279,21 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def imageModel: String =
     strAt("image", "model").orElse(env.get("IMAGE_MODEL")).getOrElse("dall-e-3")
 
+  // Video generation (`video.*`), used by the video_generate tool. Async
+  // submit → poll → download, OpenAI Sora-shaped. Key falls back to
+  // IMAGE_API_KEY / OPENAI_API_KEY.
+  def videoApiKey: Maybe[String] =
+    strAt("video", "api_key").orElse(env.get("VIDEO_API_KEY"))
+      .orElse(env.get("IMAGE_API_KEY")).orElse(env.get("OPENAI_API_KEY"))
+  def videoApiBase: String =
+    strAt("video", "api_base").orElse(env.get("VIDEO_API_BASE")).getOrElse("https://api.openai.com/v1")
+  def videoModel: String =
+    strAt("video", "model").orElse(env.get("VIDEO_MODEL")).getOrElse("sora-2")
+  def videoPollSeconds: Int =
+    at("video", "poll_seconds").flatMap(_.int).getOrElse(5).max(1)
+  def videoMaxPolls: Int =
+    at("video", "max_polls").flatMap(_.int).getOrElse(120).max(1)
+
   // --- toolsets -----------------------------------------------------------
 
   def platformToolsets(platform: String): Maybe[List[String]] =
