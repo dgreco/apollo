@@ -45,13 +45,30 @@ final class Repl(
   private var asyncEnabled  = false                      // display.async_input && interactive
   private val turnRunning   = new java.util.concurrent.atomic.AtomicBoolean(false) // async mode
 
-  def banner: String =
-    val skillsLine = s"session ${Style.dim(sess)}"
-    s"""${Style.gold("☀ apollo")} — ${runtime.displayName} · ${Style.bold(runtime.model)}
-       |$skillsLine · ${toolNames.length} tools · /help for commands""".stripMargin
+  /** Active tools grouped by their toolset, sorted — for the welcome banner. */
+  private def toolGroups: List[(String, List[String])] =
+    toolNames.flatMap(n => ToolRegistry.byName.get(n).map(e => (e.toolset, n)))
+      .groupBy(_._1).toList
+      .map((ts, ps) => (ts, ps.map(_._2).sorted))
+      .sortBy(_._1)
+
+  /** The full Hermes-style welcome screen (title + framed two-column panel). */
+  def bannerText: String < (Sync & Async) =
+    toolCtx.skills.scan.map { sk =>
+      val skillGroups = sk.groupBy(_.category).toList
+        .map((c, ss) => (c, ss.map(_.name).sorted)).sortBy(_._1)
+      val allTools   = toolGroups
+      val shownTools = allTools.take(12)
+      Banner.render(
+        Cli.version, runtime.displayName, runtime.model, runtime.providerSlug,
+        toolCtx.cwd.toString, sess,
+        shownTools, skillGroups,
+        toolCount = toolNames.length, skillCount = sk.length,
+        moreToolsets = allTools.length - shownTools.length)
+    }
 
   def run: Unit < (Sync & Async) =
-    initAsync.andThen(Console.printLine(banner)).andThen(mainLoop)
+    initAsync.andThen(bannerText).map(Console.printLine).andThen(mainLoop)
 
   /** Runs one seeded turn (the `-q` flag on a TTY) then continues interactively. */
   def runSeeded(query: String): Unit < (Sync & Async) =
@@ -333,7 +350,7 @@ final class Repl(
         agent.restore(Nil)
         Sync.defer(print(clearScreen)).andThen(Console.printLine("cleared — fresh conversation")).andThen(true)
       case "redraw" =>
-        Sync.defer(print(clearScreen)).andThen(Console.printLine(banner)).andThen(true)
+        Sync.defer(print(clearScreen)).andThen(bannerText).map(Console.printLine).andThen(true)
       case "title" =>
         if arg.isEmpty then Console.printLine("usage: /title <name>").andThen(true)
         else store.updateMeta(sess)(_.copy(title = Present(arg)))

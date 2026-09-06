@@ -250,7 +250,7 @@ object Cli:
 
   private def seedAndRepl(session: Session, query: String): Unit < (Sync & Async) =
     // -q on a TTY seeds the interactive session with a first turn.
-    Console.printLine(session.repl.banner).andThen {
+    session.repl.bannerText.map(Console.printLine).andThen {
       session.repl.runSeeded(query)
     }
 
