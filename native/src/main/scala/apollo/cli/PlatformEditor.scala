@@ -27,6 +27,12 @@ object PlatformEditor:
   private def up(n: Int)   = s"$Esc[${n}A" // move cursor up n rows (relative, scroll-safe)
   private val Dim      = s"$Esc[2m"      // dim text
   private val Rst      = s"$Esc[0m"      // reset attributes
+  private val SaveCur  = s"${Esc}7"      // DECSC — save cursor
+  private val RestCur  = s"${Esc}8"      // DECRC — restore cursor
+  private def region(top: Int, bot: Int) = s"$Esc[$top;${bot}r" // DECSTBM scroll region
+  private val ResetRegion = s"$Esc[r"    // full-screen scroll region
+  private def moveTo(row: Int, col: Int) = s"$Esc[$row;${col}H"
+  private val ClrLine  = s"$Esc[2K"      // clear the whole current line
 
   def create: LineEditor < Sync =
     Sync.defer {
@@ -72,24 +78,93 @@ object PlatformEditor:
 
     def isInteractive: Boolean < Sync = Sync.defer(true)
 
-    override def terminalWidth: Int < Sync = Sync.defer(queryWidth())
+    override def terminalWidth: Int < Sync  = Sync.defer(queryWinsize()._2)
+    override def terminalHeight: Int < Sync = Sync.defer(queryWinsize()._1)
 
-    /** Terminal columns via TIOCGWINSZ on stdout — tries both the macOS
-      * (0x40087468) and Linux (0x5413) request numbers so it works without
-      * OS detection; falls back to $COLUMNS, then 0. */
-    private def queryWidth(): Int =
+    /** (rows, cols) via TIOCGWINSZ on stdout — tries both the macOS (0x40087468)
+      * and Linux (0x5413) request numbers so it works without OS detection;
+      * falls back to $LINES/$COLUMNS, then 0. */
+    private def queryWinsize(): (Int, Int) =
       try
-        def viaIoctl(req: Long): Int =
+        def viaIoctl(req: Long): (Int, Int) =
           val ws = stackalloc[CStruct4[CUnsignedShort, CUnsignedShort, CUnsignedShort, CUnsignedShort]]()
           if scala.scalanative.posix.sys.ioctl.ioctl(1, req.toSize, ws.asInstanceOf[Ptr[Byte]]) == 0 then
-            (!ws)._2.toInt
-          else 0
-        val cols = { val m = viaIoctl(0x40087468L); if m > 0 then m else viaIoctl(0x5413L) }
-        if cols > 0 then cols else colsEnv
-      catch case _: Throwable => colsEnv
+            ((!ws)._1.toInt, (!ws)._2.toInt)
+          else (0, 0)
+        val (r, c) = { val a = viaIoctl(0x40087468L); if a._2 > 0 then a else viaIoctl(0x5413L) }
+        val cols = if c > 0 then c else envInt("COLUMNS")
+        val rows = if r > 0 then r else envInt("LINES")
+        (rows, cols)
+      catch case _: Throwable => (envInt("LINES"), envInt("COLUMNS"))
 
-    private def colsEnv: Int =
-      Option(java.lang.System.getenv("COLUMNS")).flatMap(_.toIntOption).getOrElse(0)
+    private def envInt(name: String): Int =
+      Option(java.lang.System.getenv(name)).flatMap(_.toIntOption).getOrElse(0)
+
+    // --- pinned bottom status bar (DECSTBM scroll region) -------------------
+    private val barOff = sys.env.contains("APOLLO_NO_STATUS_BAR")
+    @volatile private var barEnabled = false
+    @volatile private var barText    = ""
+
+    override def supportsBottomBar: Boolean < Sync =
+      Sync.defer(!barOff && queryWinsize()._1 > 2)
+
+    /** Reserve the bottom row: set the scroll region to rows 1..(h-1) so all
+      * normal output scrolls above the pinned bar. */
+    override def enableBottomBar(): Unit < Sync = Sync.defer {
+      val h = queryWinsize()._1
+      if !barOff && h > 2 then
+        barEnabled = true
+        ioLock.synchronized {
+          print(region(1, h - 1))
+          print(moveTo(h - 1, 1)) // park the cursor at the bottom of the region
+          java.lang.System.out.flush()
+        }
+    }
+
+    override def bottomBar(text: String): Unit < Sync =
+      Sync.defer { barText = text; renderBar() }
+
+    override def disableBottomBar(): Unit < Sync = Sync.defer {
+      if barEnabled then
+        val h = queryWinsize()._1
+        ioLock.synchronized {
+          print(ResetRegion)
+          if h > 0 then print(moveTo(h, 1) + ClrLine)
+          java.lang.System.out.flush()
+        }
+      barEnabled = false
+    }
+
+    /** The escape sequence that repaints the bar on the last row without moving
+      * the cursor (save → move to row h → clear → write → restore). Empty when
+      * the bar is off. Callers that already hold ioLock append this to their own
+      * output so the writes never interleave and the lock isn't re-entered. */
+    private def barSeq(): String =
+      if barEnabled && barText.nonEmpty then
+        val h = queryWinsize()._1
+        if h > 0 then SaveCur + moveTo(h, 1) + ClrLine + barText + RestCur else ""
+      else ""
+
+    /** Repaint the bar standalone (used by bottomBar, e.g. the live ticker). */
+    private def renderBar(): Unit =
+      val seq = barSeq()
+      if seq.nonEmpty then
+        ioLock.synchronized {
+          print(seq)
+          java.lang.System.out.flush()
+        }
+
+    // Stream raw text at the cursor (partial lines OK), serialized with the bar
+    // so a concurrent ticker's repaint never interleaves. Within a scroll region
+    // this scrolls the content rows and leaves the pinned bar row untouched.
+    override def emit(text: String): Unit < Sync = Sync.defer {
+      ioLock.synchronized {
+        print(text)
+        print(barSeq()) // keep the pinned bar painted after the scroll
+        java.lang.System.out.flush()
+      }
+      ()
+    }
 
     // Emit output above the live input line: clear the line (and any menu below),
     // print the text, then reprint the prompt + current buffer and restore the
@@ -103,9 +178,12 @@ object PlatformEditor:
           print("\n")
           print(s"$curPrompt$curLine")
           if curBack > 0 then print(back(curBack))
+          print(barSeq()) // ESC[J above wiped the pinned row — repaint it
           java.lang.System.out.flush()
         else
           println(text)
+          print(barSeq())
+          java.lang.System.out.flush()
       }
       ()
     }
@@ -142,6 +220,7 @@ object PlatformEditor:
             sb.append(up(menu.length + 2))              // header + items + footer
             sb.append("\r").append(prompt).append(shown) // reposition to input-line end
           if b > 0 then sb.append(back(b))
+          sb.append(barSeq()) // repaint the pinned bar the ClrBelow above erased
           print(sb.toString)
           java.lang.System.out.flush()
 
@@ -158,6 +237,8 @@ object PlatformEditor:
               val shownNow = if mask then "*" * buffer.length else buffer.mkString
               print(s"\r$ClrBelow$prompt$shownNow")
               println()
+              print(barSeq()) // committed line scrolled; keep the pinned bar painted
+              java.lang.System.out.flush()
               val line = buffer.mkString
               if line.nonEmpty && !mask then history += line
               result = Present(Present(line))

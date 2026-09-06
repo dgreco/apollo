@@ -29,6 +29,33 @@ trait LineEditor:
     */
   def printAbove(text: String): Unit < Sync
 
+  /** Writes raw text (possibly a partial line) at the current cursor, serialized
+    * with any pinned-bar repaints so a concurrent ticker can't corrupt it. Used
+    * to stream turn output while a bottom bar is pinned. Non-pinning editors
+    * just print — identical to the previous direct `print`. */
+  def emit(text: String): Unit < Sync =
+    Sync.defer { print(text); java.lang.System.out.flush() }
+
   /** Terminal width in columns, or 0 when unknown (non-TTY / undetectable).
     * Used to size the full-width status bar. */
   def terminalWidth: Int < Sync = Sync.defer(0)
+
+  /** Terminal height in rows, or 0 when unknown. */
+  def terminalHeight: Int < Sync = Sync.defer(0)
+
+  // --- pinned bottom status bar -------------------------------------------
+  // A status line reserved at the very bottom of the screen: output scrolls
+  // ABOVE it and it stays fixed (JLine's Status on the JVM; a DECSTBM scroll
+  // region on Native). Default no-ops for editors that can't pin (fallbacks).
+
+  /** True when this editor can pin a bottom bar (interactive TTY). */
+  def supportsBottomBar: Boolean < Sync = Sync.defer(false)
+
+  /** Reserve the bottom row and start pinning; call before printing content. */
+  def enableBottomBar(): Unit < Sync = Sync.defer(())
+
+  /** Set/repaint the pinned bar's text (already colored + width-sized). */
+  def bottomBar(text: String): Unit < Sync = Sync.defer(())
+
+  /** Release the reserved row and clear the bar (on exit). */
+  def disableBottomBar(): Unit < Sync = Sync.defer(())

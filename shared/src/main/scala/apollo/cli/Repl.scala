@@ -48,6 +48,10 @@ final class Repl(
   private var lastTurnMs      = 0L                                                  // for the persistent status bar
   private var lastUsage       = apollo.core.Usage.zero
   private var lastInput       = ""                                                  // right-aligned bar label
+  private var barPinned       = false                                              // bottom bar reserved (TTY) vs inline
+  @volatile private var turnStart     = 0L                                          // ms; >0 while a turn is live (for the ticker)
+  @volatile private var streamedChars = 0L                                          // chars streamed this turn (≈ tokens×4)
+  @volatile private var ticking       = false                                       // ticker fiber run flag
 
   /** Active tools grouped by their toolset, sorted — for the welcome banner. */
   private def toolGroups: List[(String, List[String])] =
@@ -80,9 +84,55 @@ final class Repl(
 
   private def initAsync: Unit < Sync =
     editor.isInteractive.map(i => asyncEnabled = i && toolCtx.config.asyncInput)
+      .andThen(editor.supportsBottomBar.map(barPinned = _))
 
   private def mainLoop: Unit < (Sync & Async) =
-    if asyncEnabled then asyncLoop else loop
+    // Reserve the bottom row only once the interactive loop starts, so the
+    // banner scrolls normally above it.
+    (if barPinned then editor.enableBottomBar() else Sync.defer(()))
+      .andThen(if asyncEnabled then asyncLoop else loop)
+
+  /** End the session: release the pinned row (if any), then say bye. */
+  private def quit: Unit < (Sync & Async) =
+    (if barPinned then editor.disableBottomBar() else Sync.defer(()))
+      .andThen(Console.printLine(Style.dim("bye")))
+
+  /** Draw the status bar: repaint the pinned bottom row when supported, else
+    * print it inline above the prompt (the pre-pinning behavior). */
+  private def showBar: Unit < (Sync & Async) =
+    editor.terminalWidth.map { w =>
+      val out: Unit < (Sync & Async) =
+        if barPinned then editor.bottomBar(statusBar(w)) else Console.printLine(statusBar(w))
+      out
+    }
+
+  /** The bar with live turn progress (elapsed + streamed-token estimate) while a
+    * turn runs; falls back to the last settled numbers when idle. */
+  private def liveStatusBar(width: Int): String =
+    val elapsed = if turnStart > 0 then java.lang.System.currentTimeMillis() - turnStart else lastTurnMs
+    val outTok  = if turnStart > 0 then streamedChars / 4 else lastUsage.outputTokens // ≈4 chars/token
+    StatusBar.bar(width, runtime.model, agent.lastPromptTokenCount, runtime.contextLength.getOrElse(0),
+      lastUsage.inputTokens, outTok, elapsed, lastInput)
+
+  /** Repaint the pinned bar every ~200ms until the turn ends, so elapsed time
+    * and the streamed-token count tick live. Serialized with turn output via
+    * the editor's lock. No-op unless a bar is pinned. */
+  private def tickerLoop(width: Int): Unit < (Sync & Async) =
+    if !ticking then Sync.defer(())
+    else editor.bottomBar(liveStatusBar(width))
+      .andThen(Async.sleep(200.millis))
+      .andThen(tickerLoop(width))
+
+  /** Stream raw text — through the editor (serialized with the pinned bar) when
+    * pinned, else a plain print (the previous behavior). */
+  private def emitText(t: String): Unit < Sync =
+    if barPinned then editor.emit(t) else Sync.defer { print(t); java.lang.System.out.flush() }
+
+  /** Emit a whole line — above the pinned bar when pinned, else Console. */
+  private def emitLine(s: String): Unit < (Sync & Async) =
+    val out: Unit < (Sync & Async) =
+      if barPinned then editor.printAbove(s) else Console.printLine(s)
+    out
 
   private def promptStr: String = Style.gold("☀ ") + ""
 
@@ -97,7 +147,7 @@ final class Repl(
     * whichever comes first. The spike confirmed Async.race returns the timer
     * branch promptly even while readLine is still blocked. */
   private def nextTick: Repl.Tick < (Sync & Async) =
-    editor.terminalWidth.map(w => Console.printLine(statusBar(w))).andThen {
+    showBar.andThen {
       heartbeat match
         case Present(hb) if hb.active =>
           Async.race(Seq(
@@ -112,7 +162,7 @@ final class Repl(
     nextTick.map {
       case Repl.Tick.Fired(p) =>
         Console.printLine(Style.dim("· heartbeat")).andThen(runTurn(p)).andThen(drainQueue).andThen(loop)
-      case Repl.Tick.Typed(Absent) => Console.printLine(Style.dim("bye"))
+      case Repl.Tick.Typed(Absent) => quit
       case Repl.Tick.Typed(Present(line)) =>
         val trimmed = line.trim
         if trimmed.isEmpty then loop
@@ -154,14 +204,19 @@ final class Repl(
     for
       _      <- Sync.defer(editor.onInterrupt(() => interruptFlag.set(true)))
       system <- buildSystem(tools, systemSuffix)
+      width  <- editor.terminalWidth
       t0     <- Sync.defer(java.lang.System.currentTimeMillis())
+      _      <- Sync.defer { turnStart = t0; streamedChars = 0L; ticking = barPinned; () }
+      _      <- if barPinned then Fiber.initUnscoped(tickerLoop(width)).unit else Sync.defer(())
       result <- agent.runTurn(buildUserMsg(input), system, tools, callbacks)
-      _      <- Console.printLine("")
+      _      <- Sync.defer { ticking = false; turnStart = 0L; () }
+      _      <- emitLine("")
       _      <- Sync.defer { lastTurnMs = java.lang.System.currentTimeMillis() - t0; lastUsage = result.usage; lastInput = input.take(80); () }
-      _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
+      _      <- if result.interrupted then emitLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
-                  Console.printLine(Style.red(s"· ${result.exitReason}"))
+                  emitLine(Style.red(s"· ${result.exitReason}"))
                 else Sync.defer(())
+      _      <- if barPinned then editor.bottomBar(statusBar(width)) else Sync.defer(()) // settle the bar
       _      <- maybeAutoReview(tools, result)
     yield result
 
@@ -183,16 +238,15 @@ final class Repl(
 
   private def callbacks: TurnCallbacks =
     TurnCallbacks(
-      onTextDelta = t => Sync.defer { print(t); java.lang.System.out.flush() },
+      onTextDelta = t => Sync.defer { streamedChars += t.length; () }.andThen(emitText(t)),
       onThinkingDelta = t =>
-        if showThinking then Sync.defer { print(Style.dim(t)); java.lang.System.out.flush() }
-        else (),
+        if showThinking then emitText(Style.dim(t)) else (),
       onToolStart = (name, args) =>
-        if toolProgress then Console.printLine(Style.dim(s"\n┊ $name ${args.take(120)}")) else (),
+        if toolProgress then emitLine(Style.dim(s"\n┊ $name ${args.take(120)}")) else (),
       onToolComplete = (name, preview, isError) =>
-        if toolProgress && isError then Console.printLine(Style.red(s"┊ $name failed: ${preview.take(160)}"))
+        if toolProgress && isError then emitLine(Style.red(s"┊ $name failed: ${preview.take(160)}"))
         else (),
-      onStatus = msg => if toolProgress then Console.printLine(Style.dim(s"┊ $msg")) else ()
+      onStatus = msg => if toolProgress then emitLine(Style.dim(s"┊ $msg")) else ()
     )
 
   // --- Concurrent-input mode (display.async_input) --------------------------
@@ -204,7 +258,7 @@ final class Repl(
     * text deltas into whole lines (printAbove is line-oriented). */
   private def asyncCallbacks(buf: StringBuilder): TurnCallbacks =
     TurnCallbacks(
-      onTextDelta = t => { buf.append(t); flushLines(buf) },
+      onTextDelta = t => { streamedChars += t.length; buf.append(t); flushLines(buf) },
       onThinkingDelta = t => if showThinking then { buf.append(Style.dim(t)); flushLines(buf) } else (),
       onToolStart = (name, args) =>
         if toolProgress then editor.printAbove(Style.dim(s"┊ $name ${args.take(120)}")) else (),
@@ -225,8 +279,8 @@ final class Repl(
     if s.nonEmpty then editor.printAbove(s) else Sync.defer(())
 
   private def asyncLoop: Unit < (Sync & Async) =
-    (if turnRunning.get then Sync.defer(()) else editor.terminalWidth.map(w => Console.printLine(statusBar(w)))).andThen(editor.readLine(promptStr)).map {
-      case Absent => Console.printLine(Style.dim("bye"))
+    (if turnRunning.get then Sync.defer(()) else showBar).andThen(editor.readLine(promptStr)).map {
+      case Absent => quit
       case Present(line) =>
         val t = line.trim
         if t.isEmpty then asyncLoop
@@ -260,18 +314,28 @@ final class Repl(
     * the next queued turn) or clear the running flag. */
   private def runAsyncTurn(input: String): Unit < (Sync & Async) =
     val buf = new StringBuilder
-    buildSystem(toolNames, "").map { system =>
-      val work =
-        agent.runTurn(buildUserMsg(input), system, toolNames, asyncCallbacks(buf)).map { result =>
-          val note =
-            if result.interrupted then "· interrupted"
-            else if result.exitReason.startsWith("error") then s"· ${result.exitReason}"
-            else ""
-          flushRemainder(buf)
-            .andThen(if note.isEmpty then Sync.defer(()) else editor.printAbove(Style.dim(note)))
-            .andThen(onAsyncTurnComplete)
-        }
-      Fiber.initUnscoped(work).unit
+    editor.terminalWidth.map { width =>
+      buildSystem(toolNames, "").map { system =>
+        val work =
+          Sync.defer { turnStart = java.lang.System.currentTimeMillis(); streamedChars = 0L; ticking = barPinned; () }
+            .andThen(if barPinned then Fiber.initUnscoped(tickerLoop(width)).unit else Sync.defer(()))
+            .andThen(agent.runTurn(buildUserMsg(input), system, toolNames, asyncCallbacks(buf))).map { result =>
+              val t0 = turnStart
+              val note =
+                if result.interrupted then "· interrupted"
+                else if result.exitReason.startsWith("error") then s"· ${result.exitReason}"
+                else ""
+              Sync.defer {
+                ticking = false; turnStart = 0L
+                lastTurnMs = java.lang.System.currentTimeMillis() - t0; lastUsage = result.usage; lastInput = input.take(80); ()
+              }
+                .andThen(flushRemainder(buf))
+                .andThen(if note.isEmpty then Sync.defer(()) else editor.printAbove(Style.dim(note)))
+                .andThen(if barPinned then editor.bottomBar(statusBar(width)) else Sync.defer(()))
+                .andThen(onAsyncTurnComplete)
+            }
+        Fiber.initUnscoped(work).unit
+      }
     }
 
   private def onAsyncTurnComplete: Unit < (Sync & Async) =

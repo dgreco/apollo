@@ -4,6 +4,7 @@ import kyo.*
 import org.jline.keymap.KeyMap
 import org.jline.reader.{Candidate, Completer, EndOfFileException, LineReader, LineReaderBuilder, ParsedLine, Reference, UserInterruptException, Widget}
 import org.jline.terminal.{Terminal, TerminalBuilder}
+import org.jline.utils.{AttributedString, Status}
 
 /** JVM line editor: JLine 3/4 — its default emacs keymap already provides
   * arrow keys, Ctrl-A/E, history and kill-ring. Falls back to plain
@@ -100,8 +101,50 @@ object PlatformEditor:
     // the turn fiber while the main fiber is blocked in readLine).
     def printAbove(text: String): Unit < Sync = Sync.defer { reader.printAbove(text); () }
 
+    // Stream through JLine's own writer so it stays consistent with the pinned
+    // Status line (which the ~200ms ticker's update() repaints at the bottom).
+    override def emit(text: String): Unit < Sync = Sync.defer {
+      val w = terminal.writer(); w.write(text); w.flush()
+    }
+
     override def terminalWidth: Int < Sync = Sync.defer {
       val w = terminal.getWidth; if w > 0 then w else 0
+    }
+
+    override def terminalHeight: Int < Sync = Sync.defer {
+      val h = terminal.getHeight; if h > 0 then h else 0
+    }
+
+    // --- pinned bottom status bar (JLine reserves the bottom line) ----------
+    private val barOff = sys.env.contains("APOLLO_NO_STATUS_BAR")
+
+    override def supportsBottomBar: Boolean < Sync = Sync.defer {
+      !barOff && (try Status.getStatus(terminal, true) != null catch case _: Throwable => false)
+    }
+
+    override def enableBottomBar(): Unit < Sync = Sync.defer {
+      if !barOff then
+        try
+          val st = Status.getStatus(terminal, true)
+          if st != null then st.setBorder(false)
+        catch case _: Throwable => ()
+    }
+
+    override def bottomBar(text: String): Unit < Sync = Sync.defer {
+      if !barOff then
+        try
+          val st = Status.getStatus(terminal, true)
+          if st != null then
+            // fromAnsi parses our truecolor escapes into JLine's styled string.
+            st.update(java.util.Collections.singletonList(AttributedString.fromAnsi(text)))
+        catch case _: Throwable => ()
+    }
+
+    override def disableBottomBar(): Unit < Sync = Sync.defer {
+      try
+        val st = Status.getStatus(terminal, false)
+        if st != null then st.reset()
+      catch case _: Throwable => ()
     }
   end JLineEditor
 
