@@ -25,7 +25,12 @@ object StatusBar:
     val filled  = (clamped * width).round.toInt
     ("▓" * filled) + ("░" * (width - filled))
 
-  /** The status line body (caller applies dim styling). */
+  /** Output tokens per second over the turn (0 when no turn has run). */
+  def rate(outTok: Long, turnMs: Long): Long =
+    if turnMs > 0 then outTok * 1000L / turnMs else 0L
+
+  /** The status line body (caller applies dim styling) — model · context gauge ·
+    * tokens · token-rate · turn time. Modeled on the Hermes bottom bar. */
   def render(model: String, ctxTokens: Long, ctxWindow: Int,
              inTok: Long, outTok: Long, turnMs: Long): String =
     val ctx =
@@ -33,5 +38,7 @@ object StatusBar:
         val pct = (ctxTokens * 100L / ctxWindow.toLong)
         s"ctx $pct% ${gauge(ctxTokens.toDouble / ctxWindow, 8)} ${human(ctxTokens)}/${human(ctxWindow.toLong)}"
       else s"ctx ${human(ctxTokens)}"
-    s"$model · $ctx · ${human(inTok)} in / ${human(outTok)} out · ${secs(turnMs)}"
+    val r = rate(outTok, turnMs)
+    val rateStr = if r > 0 then s" · ${r} t/s" else ""
+    s"$model · $ctx · ${human(inTok)} in / ${human(outTok)} out$rateStr · ${secs(turnMs)}"
 end StatusBar

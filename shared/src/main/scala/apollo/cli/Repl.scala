@@ -45,6 +45,8 @@ final class Repl(
   private var asyncEnabled  = false                      // display.async_input && interactive
   private val turnRunning   = new java.util.concurrent.atomic.AtomicBoolean(false) // async mode
   private var autoReviewState = AutoReview.State()                                  // agent.auto_review cadence
+  private var lastTurnMs      = 0L                                                  // for the persistent status bar
+  private var lastUsage       = apollo.core.Usage.zero
 
   /** Active tools grouped by their toolset, sorted — for the welcome banner. */
   private def toolGroups: List[(String, List[String])] =
@@ -83,18 +85,28 @@ final class Repl(
 
   private def promptStr: String = Style.gold("☀ ") + ""
 
+  /** The persistent bottom status bar drawn above the prompt every turn
+    * (model · context gauge · tokens · rate · last turn time), matching the
+    * Hermes bottom toolbar. */
+  private def statusBar: String =
+    val rest = StatusBar.render("", agent.lastPromptTokenCount, runtime.contextLength.getOrElse(0),
+      lastUsage.inputTokens, lastUsage.outputTokens, lastTurnMs) // rest starts with " · "
+    Style.dim("▎") + Style.gold(runtime.model) + Style.dim(rest)
+
   /** Wait for the next input line, OR — when a heartbeat is active — the timer,
     * whichever comes first. The spike confirmed Async.race returns the timer
     * branch promptly even while readLine is still blocked. */
   private def nextTick: Repl.Tick < (Sync & Async) =
-    heartbeat match
-      case Present(hb) if hb.active =>
-        Async.race(Seq(
-          editor.readLine(promptStr).map(Repl.Tick.Typed(_)),
-          Async.sleep(hb.interval.seconds).andThen(Repl.Tick.Fired(hb.prompt))
-        ))
-      case _ =>
-        editor.readLine(promptStr).map(Repl.Tick.Typed(_))
+    Console.printLine(statusBar).andThen {
+      heartbeat match
+        case Present(hb) if hb.active =>
+          Async.race(Seq(
+            editor.readLine(promptStr).map(Repl.Tick.Typed(_)),
+            Async.sleep(hb.interval.seconds).andThen(Repl.Tick.Fired(hb.prompt))
+          ))
+        case _ =>
+          editor.readLine(promptStr).map(Repl.Tick.Typed(_))
+    }
 
   private def loop: Unit < (Sync & Async) =
     nextTick.map {
@@ -145,10 +157,7 @@ final class Repl(
       t0     <- Sync.defer(java.lang.System.currentTimeMillis())
       result <- agent.runTurn(buildUserMsg(input), system, tools, callbacks)
       _      <- Console.printLine("")
-      _      <- Sync.defer(java.lang.System.currentTimeMillis()).map(now =>
-                  Console.printLine(Style.dim(StatusBar.render(
-                    runtime.model, agent.lastPromptTokenCount, runtime.contextLength.getOrElse(0),
-                    result.usage.inputTokens, result.usage.outputTokens, now - t0))))
+      _      <- Sync.defer { lastTurnMs = java.lang.System.currentTimeMillis() - t0; lastUsage = result.usage; () }
       _      <- if result.interrupted then Console.printLine(Style.red("· interrupted"))
                 else if result.exitReason.startsWith("error") then
                   Console.printLine(Style.red(s"· ${result.exitReason}"))
@@ -216,7 +225,7 @@ final class Repl(
     if s.nonEmpty then editor.printAbove(s) else Sync.defer(())
 
   private def asyncLoop: Unit < (Sync & Async) =
-    editor.readLine(promptStr).map {
+    (if turnRunning.get then Sync.defer(()) else Console.printLine(statusBar)).andThen(editor.readLine(promptStr)).map {
       case Absent => Console.printLine(Style.dim("bye"))
       case Present(line) =>
         val t = line.trim

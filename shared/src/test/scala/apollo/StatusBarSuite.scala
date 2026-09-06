@@ -38,4 +38,14 @@ class StatusBarSuite extends munit.FunSuite:
     assert(s.contains("ctx 50"), s)
     assert(!s.contains("%"), s)
   }
+
+  test("token rate: out tokens per second, 0 before any turn") {
+    assertEquals(StatusBar.rate(340, 3200), 106L)
+    assertEquals(StatusBar.rate(100, 0), 0L)
+    val s = StatusBar.render("gpt-5", 20000, 200000, 1200, 340, 3200)
+    assert(s.contains("106 t/s"), s)
+    // no rate segment when idle (no turn yet)
+    assert(!StatusBar.render("gpt-5", 0, 200000, 0, 0, 0).contains("t/s"))
+    println("\nstatus bar sample: " + StatusBar.render("deepseek-v4-flash", 16400, 1000000, 4200, 980, 9200))
+  }
 end StatusBarSuite
