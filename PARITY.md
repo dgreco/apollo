@@ -55,7 +55,12 @@ into a platform. Roughly ordered by value/effort.
 - Vision analysis (input) done in Group A. **`image_generate`** done — a tool
   hitting an OpenAI-compatible `/images/generations` endpoint (`image.*` config),
   saving the PNG. Video generation still open (niche/heavy).
-- **Browser automation** (multiple backends in Hermes).
+- ~~**Browser automation**~~ **done** — a `browser` tool driving a real headless
+  Chrome over the DevTools Protocol (CDP) on a WebSocket (works JVM + Native):
+  navigate, read content/visible-text, run JS, click a selector, screenshot.
+  Connects to a running Chrome via `CHROME_CDP_URL` or launches one when
+  `browser.enabled`. (Hermes ships several backends; apollo uses CDP directly,
+  no SDK.)
 - ~~**Skills Hub**~~ **done (install/search)** — `apollo skills install <git-url|owner/repo|dir>`
   (git clone / local copy) and `apollo skills search <q>` over a catalog
   (`skills.hub_catalog_url`). Ledger/linter/curate still open.

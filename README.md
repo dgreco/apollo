@@ -28,10 +28,12 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
   Auto-detection, `${VAR}` expansion, per-model reasoning effort, and
   `fallback_providers` failover.
 - **Tools** — `read_file` / `write_file` / `patch` / `search_files`, `terminal`
-  + `process_manage` (local, `docker exec`, or `ssh` backends), `todo_list`,
-  `memory`, `skills_*`, `clarify`, `session_search`, `delegate_task` (real
-  subagents), `cronjob_manage`, `web_search` / `web_extract`, plus every tool
-  exported by connected **MCP servers**.
+  + `process_manage` (local, `docker exec`, `ssh`, `singularity`, or a generic
+  sandbox-CLI backend), `todo_list`, `memory`, `skills_*`, `clarify`,
+  `session_search`, `delegate_task` (real subagents), `cronjob_manage`,
+  `web_search` / `web_extract`, `vision_analyze`, `image_generate`,
+  `execute_code`, `tool_search`, `browser` (headless Chrome over CDP), plus
+  every tool exported by connected **MCP servers**.
 - **MCP client** — stdio and streamable-HTTP transports, OAuth 2.1 + PKCE, a
   reliability ladder (circuit breaker / keepalive / reconnect / parking), and
   `apollo mcp add|remove|list|test|login|reauth|logout`.

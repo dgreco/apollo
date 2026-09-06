@@ -129,6 +129,9 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
     * nudges, which only remind). Opt-in — it spends an extra model call. */
   def autoReviewEnabled: Boolean  = at("agent", "auto_review").flatMap(_.bool).getOrElse(false)
   def autoReviewInterval: Int     = at("agent", "auto_review_interval").flatMap(_.int).getOrElse(5).max(1)
+  /** `browser.enabled`: allow the `browser` tool to launch a headless Chrome
+    * (an already-running CDP endpoint via CHROME_CDP_URL works regardless). */
+  def browserEnabled: Boolean     = at("browser", "enabled").flatMap(_.bool).getOrElse(false)
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)
