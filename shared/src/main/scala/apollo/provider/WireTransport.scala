@@ -8,7 +8,10 @@ final case class TurnRequest(
     runtime: ResolvedRuntime,
     systemPrompt: String,
     messages: List[Message],
-    tools: List[ToolSpec]
+    tools: List[ToolSpec],
+    /** Attach provider prompt-cache breakpoints to the stable prefix
+      * (Anthropic today). Off disables caching for this request. */
+    promptCache: Boolean = true
 )
 
 /** A provider wire protocol: builds the request, streams the response,

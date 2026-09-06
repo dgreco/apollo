@@ -53,21 +53,41 @@ object AnthropicTransport extends WireTransport:
     val rt                                               = request.runtime
     val (thinking, outputConfig, temperature, minTokens) = thinkingKwargs(rt)
     val maxTokens = math.max(rt.maxTokens.getOrElse(defaultMaxTokens), minTokens)
+    // Prompt caching is an Anthropic-native feature (`cache_control` blocks);
+    // compatible hosts (MiniMax, Kimi, … — often reached via an `/anthropic`
+    // path) may reject the field, so gate on the native API host specifically.
+    val cache = request.promptCache && rt.baseUrl.toLowerCase.contains("api.anthropic.com")
+
+    // system: plain string, or a single text block carrying a cache breakpoint
+    // so the (large, stable) system prompt is cached across turns.
+    val systemJson: Value =
+      if cache && request.systemPrompt.nonEmpty then
+        Jx.arr(Jx.obj("type" -> Jx.str("text"), "text" -> Jx.str(request.systemPrompt))
+          .withField("cache_control", ephemeral))
+      else Jx.str(request.systemPrompt)
+
     val toolsJson =
       if request.tools.isEmpty then Absent
       else
-        Present(Jx.arr(request.tools.map { t =>
-          Jx.obj(
+        val lastIdx = request.tools.length - 1
+        Present(Jx.arr(request.tools.zipWithIndex.map { case (t, i) =>
+          val base = Jx.obj(
             "name"         -> Jx.str(t.name),
             "description"  -> Jx.str(t.description),
             "input_schema" -> Jx.parse(t.parametersJson).getOrElse(Jx.obj())
           )
+          // A breakpoint on the last tool caches the whole (stable) tools block.
+          if cache && i == lastIdx then base.withField("cache_control", ephemeral) else base
         }))
+
+    val encoded  = request.messages.flatMap(encodeMessage)
+    val messages = if cache then cacheLastBlock(encoded) else encoded
+
     Jx.objOf(
       "model"       -> Present(Jx.str(rt.wireModel)),
       "max_tokens"  -> Present(Jx.num(maxTokens)),
-      "system"      -> Present(Jx.str(request.systemPrompt)),
-      "messages"    -> Present(Jx.arr(request.messages.flatMap(encodeMessage))),
+      "system"      -> Present(systemJson),
+      "messages"    -> Present(Jx.arr(messages)),
       "tools"       -> toolsJson,
       "stream"        -> (if stream then Present(Jx.bool(true)) else Absent),
       "thinking"      -> thinking,
@@ -75,6 +95,22 @@ object AnthropicTransport extends WireTransport:
       "temperature"   -> temperature
     )
   end buildBody
+
+  private val ephemeral: Value = Jx.obj("type" -> Jx.str("ephemeral"))
+
+  /** Adds a rolling cache breakpoint on the last content block of the last
+    * message, so the entire conversation prefix up to now is cached and the
+    * next turn (which appends past it) is a cache hit. */
+  private[provider] def cacheLastBlock(msgs: List[Value]): List[Value] =
+    if msgs.isEmpty then msgs
+    else
+      val last = msgs.last
+      val updated = (last / "content").asArr match
+        case Present(blocks) if blocks.nonEmpty =>
+          val marked = blocks.dropRight(1).append(blocks.last.withField("cache_control", ephemeral))
+          last.withField("content", Jx.arr(marked))
+        case _ => last
+      msgs.dropRight(1) :+ updated
 
   /** upstream `_thinking_kwargs`: adaptive thinking (+ `output_config.effort`)
     * for Claude 4.6+/unknown Claude and Kimi; legacy budget thinking (plus

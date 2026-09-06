@@ -108,6 +108,17 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def maxTurns: Maybe[Int]        = at("agent", "max_turns").flatMap(_.int)
   def apiMaxRetries: Int          = at("agent", "api_max_retries").flatMap(_.int).getOrElse(3).max(1)
   def verbose: Boolean            = at("agent", "verbose").flatMap(_.bool).getOrElse(false)
+  /** `agent.repetition_limit`: break the turn when the model emits the same
+    * tool-call (or final-text) signature this many times in a row (0 = off). */
+  def repetitionLimit: Int        = at("agent", "repetition_limit").flatMap(_.int).getOrElse(4).max(0)
+  /** `agent.empty_response_retries`: how many times to re-prompt the model in
+    * one turn when it returns neither text nor tool calls (0 = never retry). */
+  def emptyResponseRetries: Int   = at("agent", "empty_response_retries").flatMap(_.int).getOrElse(1).max(0)
+  /** `prompt_cache.enabled` (fallback `agent.prompt_cache`): attach provider
+    * prompt-cache breakpoints to the stable prefix (Anthropic today). */
+  def promptCacheEnabled: Boolean =
+    at("prompt_cache", "enabled").flatMap(_.bool)
+      .orElse(at("agent", "prompt_cache").flatMap(_.bool)).getOrElse(true)
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)

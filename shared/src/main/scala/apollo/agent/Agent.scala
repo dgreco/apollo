@@ -19,7 +19,7 @@ final case class TurnCallbacks(
 
 final case class TurnResult(
     finalResponse: String,
-    exitReason: String, // text_response | max_iterations | interrupted | error(...)
+    exitReason: String, // text_response | max_iterations | interrupted | empty_response | repetition_guard | error(...)
     apiCalls: Int,
     usage: Usage,
     interrupted: Boolean
@@ -49,6 +49,10 @@ final class Agent(
   private var apiCalls         = 0
   private var nudgeState       = Nudges.State()
   private var nudgeHydrated     = false
+
+  // --- per-turn loop guards (reset in runTurn) ----------------------------
+  private var recentSignatures = List.empty[String]
+  private var emptyRetriesUsed = 0
 
   private var sid           = sessionId
   private var forceCompress = false
@@ -91,6 +95,8 @@ final class Agent(
       callbacks: TurnCallbacks
   ): TurnResult < (Sync & Async) =
     interruptFlag.set(false)
+    recentSignatures = Nil
+    emptyRetriesUsed = 0
     val settings = nudgeSettings(toolNames)
     // Lazily hydrate the nudge cadence from restored history on the first turn
     // (Hermes parity), now that the toolset is known.
@@ -136,7 +142,8 @@ final class Agent(
             runtime = runtime,
             systemPrompt = systemPrompt,
             messages = messages,
-            tools = if grace then Nil else ToolRegistry.definitions(toolNames, toolCtx)
+            tools = if grace then Nil else ToolRegistry.definitions(toolNames, toolCtx),
+            promptCache = config.promptCacheEnabled
           )
           callWithFallback(request, callbacks).map {
             case Result.Failure(AgentError.Interrupted) =>
@@ -153,10 +160,37 @@ final class Agent(
               // Durability invariant: the assistant message (tool calls
               // included) is persisted BEFORE any tool executes.
               messages = messages :+ response.message
+              recentSignatures =
+                Guards.pushSignature(recentSignatures, Guards.signature(response.message), config.repetitionLimit)
               store.appendMessage(sid, response.message).andThen {
                 if toolUses.isEmpty then
                   val text = response.message.content.collect { case Content.Text(t) => t }.mkString("\n")
-                  finishTurn(text, "text_response", interrupted = false)
+                  // Empty-response guard: no text and no tool calls. Re-prompt a
+                  // bounded number of times before giving up, so a transient
+                  // blank reply doesn't silently end the turn.
+                  if Guards.isEmptyResponse(response.message) then
+                    if emptyRetriesUsed < config.emptyResponseRetries then
+                      emptyRetriesUsed += 1
+                      val nudge = Message.user(Guards.emptyResponseNudge)
+                      messages = messages :+ nudge
+                      callbacks.onStatus("empty response; re-prompting")
+                        .andThen(store.appendMessage(sid, nudge))
+                        .andThen(loop(systemPrompt, toolNames, callbacks, iterationsThisTurn + 1, graceUsed || grace))
+                    else finishTurn(text, "empty_response", interrupted = false)
+                  else finishTurn(text, "text_response", interrupted = false)
+                else if Guards.isRepeating(recentSignatures, config.repetitionLimit) then
+                  // Repetition guard: the model has called the same tool with the
+                  // same arguments `repetition_limit` times running. Stop the loop,
+                  // but stub the pending tool calls so tool_call/result pairing
+                  // (and thus role alternation) stays intact in the transcript.
+                  val stubbed = Message.toolResults(toolUses.map(tu =>
+                    Content.ToolResult(tu.id, "[stopped: repetition guard — same tool call repeated]", true)))
+                  messages = messages :+ stubbed
+                  callbacks.onStatus("repetition guard: same action repeated; stopping")
+                    .andThen(store.appendMessage(sid, stubbed))
+                    .andThen(finishTurn(
+                      s"(stopped: repeated the same action ${config.repetitionLimit} times without progress)",
+                      "repetition_guard", interrupted = false))
                 else
                   runToolRound(toolUses, callbacks).map { results =>
                     val resultMsg = Message.toolResults(results)

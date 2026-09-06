@@ -47,7 +47,7 @@ into a platform. Roughly ordered by value/effort.
 | ~~**MCP: sampling + elicitation**~~ | **Done (stdio)** — server-initiated `sampling/createMessage` (runs a model call) and `elicitation/create` (asks the user / declines) handled by `McpClient`. Still open: same for the **HTTP** transport, **MCP server mode**, legacy **SSE**. |
 | ~~**Provider OAuth**~~ | **Copilot done** — `apollo auth copilot login` (OAuth device-code) + GitHub→Copilot token exchange; `copilot` is now a resolvable provider. ⚠️ Reverse-engineered constants; the live flow needs hands-on validation. Still unsupported: ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini, MoA. |
 | ~~**Bedrock streaming**~~ | **Done** — `ConverseStream` decoded via `apollo.util.EventStream`; selected by `model.streaming`. |
-| **Guards** | repetition guard, empty-response guard, prompt-cache boundary management. |
+| ~~**Guards**~~ | **Done** — repetition guard (breaks a turn on `agent.repetition_limit` identical tool calls), empty-response guard (re-prompts `agent.empty_response_retries` times, then exits `empty_response`), and Anthropic prompt-cache breakpoints on system+tools+rolling-last-message (`prompt_cache.enabled`). |
 | **More terminal backends** | Hermes has 7 (local/docker/ssh + singularity/modal/daytona/vercel-sandbox); apollo has 3. |
 
 ## Group B — breadth features (bigger; arguably in-scope)
