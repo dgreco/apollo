@@ -69,8 +69,14 @@ into a platform. Roughly ordered by value/effort.
   long-poll + send; WhatsApp Cloud, Twilio SMS, and Teams (Bot Framework, with an
   Azure-AD client-credentials bearer) are inbound-webhook servers that ACK
   immediately and reply out-of-band via REST; iMessage (macOS, `IMESSAGE_ENABLED`)
-  polls the Messages `chat.db` via `sqlite3` and sends via `osascript`. Email is
-  the remaining one — see below (now done via kyo-net TLS sockets).
+  polls the Messages `chat.db` via `sqlite3` and sends via `osascript`.
+- **Email (IMAP/SMTP)** — **done, JVM build**: poll an IMAP INBOX for unseen
+  messages, run each through the agent, reply over SMTP (`EMAIL_IMAP_HOST` /
+  `EMAIL_USER` / `EMAIL_PASSWORD`, TLS-aware port defaults). The protocol layer
+  is pure/shared and tested on both platforms; the TLS socket I/O uses the JDK's
+  `javax.net.ssl` (no new dependency), so on **Native** — which has no TLS-socket
+  support — it degrades to a clear "JVM-only" error (a platform gap alongside the
+  line editor / session-search backend).
 
 ## Group C — out of apollo's scope (platform, not core agent)
 

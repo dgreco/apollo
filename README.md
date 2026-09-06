@@ -87,8 +87,9 @@ Native notes:
   runtime the same as on the JVM.
 
 The two builds are byte-for-byte behaviorally identical except where a platform
-genuinely differs (line editor, session-search backend, Ctrl-C handling) — those
-gaps are called out in [`ARCH.md`](./ARCH.md).
+genuinely differs (line editor, session-search backend, Ctrl-C handling, and the
+email gateway — which needs JDK TLS sockets, so it is JVM-only) — those gaps are
+called out in [`ARCH.md`](./ARCH.md).
 
 ---
 

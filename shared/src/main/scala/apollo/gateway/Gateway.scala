@@ -39,6 +39,7 @@ object Gateway:
     val twilioSid   = env.get("TWILIO_ACCOUNT_SID")
     val teamsAppId  = env.get("TEAMS_APP_ID")
     val imessageOn  = env.getBool("IMESSAGE_ENABLED").getOrElse(false)
+    val emailHost   = env.get("EMAIL_IMAP_HOST")
     val apiKey   = env.get("API_SERVER_KEY")
       .orElse(config.platformConfig("api_server").flatMap(_.path("extra", "key")).flatMap(_.str))
     val apiEnabled = config.platformEnabled("api_server").getOrElse(apiKey.nonEmpty)
@@ -93,15 +94,21 @@ object Gateway:
             case Absent     => Nil
         val imessageServices: List[Unit < (Sync & Async)] =
           if imessageOn then IMessage.services(config, hub) else Nil
+        val emailServices: List[Unit < (Sync & Async)] =
+          emailHost match
+            case Present(_) => Email.services(config, hub)
+            case Absent     => Nil
         telegramServices.map { tg =>
           discordServices.map { dc =>
           slackServices.map { sl =>
           matrixServices.map { mx =>
           val platformCount = tg.length + dc.length + sl.length + mx.length +
-            whatsappServices.length + smsServices.length + teamsServices.length + imessageServices.length
+            whatsappServices.length + smsServices.length + teamsServices.length +
+            imessageServices.length + emailServices.length
             + (if apiEnabled then 1 else 0) + (if webhookEnabled then 1 else 0)
           val services =
-            tg ++ dc ++ sl ++ mx ++ whatsappServices ++ smsServices ++ teamsServices ++ imessageServices
+            tg ++ dc ++ sl ++ mx ++ whatsappServices ++ smsServices ++ teamsServices ++
+              imessageServices ++ emailServices
               ++ (if apiEnabled then List(ApiServer.serve(config, hub, apiKey)) else Nil)
               ++ (if webhookEnabled then List(Webhook.serve(config, hub, webhookSecret)) else Nil)
               ++ List(apollo.cron.Scheduler.runLoop(config, paths))
