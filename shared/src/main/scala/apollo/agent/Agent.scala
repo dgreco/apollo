@@ -54,6 +54,8 @@ final class Agent(
   private var recentSignatures = List.empty[String]
   private var emptyRetriesUsed = 0
   private var checkpointedThisTurn = false
+  private var turnStartMs = 0L
+  private val toolTimings = scala.collection.mutable.ListBuffer[apollo.obs.Monitor.ToolTiming]()
 
   private var sid           = sessionId
   private var forceCompress = false
@@ -99,6 +101,8 @@ final class Agent(
     recentSignatures = Nil
     emptyRetriesUsed = 0
     checkpointedThisTurn = false
+    turnStartMs = java.lang.System.currentTimeMillis()
+    toolTimings.clear()
     val settings = nudgeSettings(toolNames)
     // Lazily hydrate the nudge cadence from restored history on the first turn
     // (Hermes parity), now that the toolset is known.
@@ -237,10 +241,13 @@ final class Agent(
         // Keep tool_call/result pairing intact on interrupt.
         Content.ToolResult(tu.id, s"[Tool execution cancelled — ${tu.name} was skipped due to user interrupt]", true)
       else
-        callbacks.onToolStart(tu.name, tu.arguments.take(200)).andThen {
-          ToolRegistry.dispatch(tu.name, tu.arguments, toolCtx).map { (output, isError) =>
-            callbacks.onToolComplete(tu.name, output.take(300), isError)
-              .andThen(Content.ToolResult(tu.id, output, isError))
+        Sync.defer(java.lang.System.currentTimeMillis()).map { t0 =>
+          callbacks.onToolStart(tu.name, tu.arguments.take(200)).andThen {
+            ToolRegistry.dispatch(tu.name, tu.arguments, toolCtx).map { (output, isError) =>
+              Sync.defer { toolTimings += apollo.obs.Monitor.ToolTiming(tu.name, t0, java.lang.System.currentTimeMillis(), isError); () }
+                .andThen(callbacks.onToolComplete(tu.name, output.take(300), isError))
+                .andThen(Content.ToolResult(tu.id, output, isError))
+            }
           }
         }
     }.map(_.toList)
@@ -393,7 +400,18 @@ final class Agent(
   private def finishTurn(text: String, reason: String, interrupted: Boolean): TurnResult < (Sync & Async) =
     store.updateMeta(sid)(m =>
       m.copy(messageCount = messages.length, apiCalls = apiCalls, usage = totalUsage)
-    ).andThen(TurnResult(text, reason, apiCalls, totalUsage, interrupted))
+    ).andThen(maybeExportTrace(reason)).andThen(TurnResult(text, reason, apiCalls, totalUsage, interrupted))
+
+  /** Fire-and-forget content-free OTLP trace for this turn (gated by
+    * `monitoring.export.otlp.enabled`). */
+  private def maybeExportTrace(reason: String): Unit < (Sync & Async) =
+    if !apollo.obs.Monitor.enabled(config) then Sync.defer(())
+    else
+      Sync.defer(java.lang.System.currentTimeMillis()).map { end =>
+        Fiber.initUnscoped(apollo.obs.Monitor.exportTurn(
+          config, reason, apiCalls.toLong, totalUsage.inputTokens, totalUsage.outputTokens,
+          turnStartMs, end, toolTimings.toList)).unit
+      }
 end Agent
 
 /** Strict role-alternation repair (upstream `repair_message_sequence`):

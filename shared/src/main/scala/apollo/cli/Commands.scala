@@ -316,6 +316,15 @@ object Commands:
             Console.printLine(Style.green("copilot: logged in — use  -m copilot:<model>  (e.g. copilot:gpt-4o)")))
       }
 
+  /** `apollo monitoring status` — the OTLP export configuration. */
+  def monitoring(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    Console.printLine(List(
+      s"otlp export:   ${if config.otlpEnabled then "enabled" else "disabled"}",
+      s"endpoint:      ${if config.otlpEndpoint.isEmpty then "(unset)" else config.otlpEndpoint}",
+      s"service.name:  ${config.otlpServiceName}",
+      s"active:        ${apollo.obs.Monitor.enabled(config)} (content-free turn/tool traces)"
+    ).mkString("\n"))
+
   /** `apollo secrets [status|resolve]` — configured secret sources + a dry-run
     * resolution (values masked). */
   def secrets(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =

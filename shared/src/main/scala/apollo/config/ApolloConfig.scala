@@ -135,6 +135,18 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   /** `checkpoints.enabled`: auto-snapshot the git working tree (as a shadow ref)
     * before the first file-mutating tool call each turn. Opt-in (Hermes parity). */
   def checkpointsEnabled: Boolean = at("checkpoints", "enabled").flatMap(_.bool).getOrElse(false)
+  /** `monitoring.export.otlp.*`: content-free OpenTelemetry (OTLP/HTTP JSON)
+    * export of turn/tool traces. Opt-in; never exports prompts/args/results. */
+  def otlpEnabled: Boolean =
+    at("monitoring", "export", "otlp", "enabled").flatMap(_.bool).getOrElse(false)
+  def otlpEndpoint: String =
+    strAt("monitoring", "export", "otlp", "endpoint").orElse(env.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
+      .getOrElse("").stripSuffix("/")
+  def otlpHeaders: Map[String, String] =
+    at("monitoring", "export", "otlp", "headers").flatMap(_.entries).getOrElse(Nil)
+      .flatMap((k, v) => v.str.map(s => k -> expandVars(s)).toList).toMap
+  def otlpServiceName: String =
+    strAt("monitoring", "export", "otlp", "service_name").getOrElse("apollo")
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)
