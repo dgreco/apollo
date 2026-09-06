@@ -316,6 +316,19 @@ object Commands:
             Console.printLine(Style.green("copilot: logged in — use  -m copilot:<model>  (e.g. copilot:gpt-4o)")))
       }
 
+  /** `apollo lsp [list]` — the language-server registry + PATH availability. */
+  def lsp(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    val path = Option(java.lang.System.getenv("PATH")).getOrElse("")
+    def onPath(bin: String): Boolean =
+      bin.contains("/") && java.nio.file.Files.isExecutable(java.nio.file.Paths.get(bin)) ||
+        path.split(java.io.File.pathSeparator).iterator.filter(_.nonEmpty)
+          .exists(d => java.nio.file.Files.isExecutable(java.nio.file.Paths.get(d, bin)))
+    val rows = apollo.lsp.Lsp.defaultServers.map { (ext, s) =>
+      val bin = config.lspServerCommand(ext).map(_.head).getOrElse(s.argv.head)
+      s"  .$ext  ->  $bin  ${if onPath(bin) then "(found)" else "(not on PATH)"}"
+    }
+    Console.printLine(s"lsp: ${if config.lspEnabled then "enabled" else "disabled"}\nservers:\n" + rows.mkString("\n"))
+
   /** `apollo monitoring status` — the OTLP export configuration. */
   def monitoring(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
     Console.printLine(List(

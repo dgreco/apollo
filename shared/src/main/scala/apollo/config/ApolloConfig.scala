@@ -147,6 +147,14 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
       .flatMap((k, v) => v.str.map(s => k -> expandVars(s)).toList).toMap
   def otlpServiceName: String =
     strAt("monitoring", "export", "otlp", "service_name").getOrElse("apollo")
+  /** `computer_use.enabled`: allow the computer_use tool to control the desktop
+    * (screen/mouse/keyboard via macOS `screencapture`/`cliclick`). Opt-in. */
+  def computerUseEnabled: Boolean = at("computer_use", "enabled").flatMap(_.bool).getOrElse(false)
+  /** `lsp.enabled` (default true): allow the lsp tool to spawn language servers. */
+  def lspEnabled: Boolean = at("lsp", "enabled").flatMap(_.bool).getOrElse(true)
+  /** `lsp.servers.<ext>`: an argv list overriding the built-in launch command. */
+  def lspServerCommand(ext: String): Maybe[List[String]] =
+    at("lsp", "servers", ext).flatMap(_.strings).filter(_.nonEmpty)
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)

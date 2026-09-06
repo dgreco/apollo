@@ -52,6 +52,8 @@ object Toolsets:
     "tts"            -> Def("Synthesize speech from text", List("text_to_speech")),
     "stt"            -> Def("Transcribe audio to text", List("transcribe")),
     "kanban"         -> Def("A local task board", List("kanban")),
+    "computer_use"   -> Def("Desktop control: screen, mouse, keyboard", List("computer_use")),
+    "lsp"            -> Def("Language-server diagnostics", List("lsp")),
     "browser"        -> Def("Drive a headless Chrome (navigate, read, click, screenshot)", List("browser")),
     // Composite / scenario toolsets
     "debugging" -> Def("Troubleshooting bundle", Nil, List("terminal", "web", "file")),
