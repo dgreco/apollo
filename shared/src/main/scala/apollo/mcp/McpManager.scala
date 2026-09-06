@@ -149,6 +149,9 @@ object McpManager:
                 stdio.onToolsListChanged = () => handle.refreshTools()
                 // Server→client requests (sampling/elicitation) route to the wired handlers.
                 stdio.onServerRequest = (m, p) => dispatchServerRequest(m, p)
+              case Result.Success(http: McpHttpClient) =>
+                // Same server→client routing over the streamable-HTTP transport.
+                http.onServerRequest = (m, p) => dispatchServerRequest(m, p)
               case _ => ()
             r
           },

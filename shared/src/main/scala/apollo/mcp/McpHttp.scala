@@ -30,6 +30,12 @@ final class McpHttpClient private (
   @volatile private var negotiatedVersion: String    = Mcp.protocolVersion
   @volatile private var deadReason: Maybe[String]    = Absent
 
+  /** Server→client JSON-RPC requests (`sampling/createMessage`,
+    * `elicitation/create`) that arrive on an SSE stream are routed here; the
+    * default refuses. `McpManager` wires it to the shared handlers. */
+  @volatile private[mcp] var onServerRequest: (String, Value) => Result[String, Value] < (Sync & Async) =
+    (m, _) => Result.fail(s"method not supported: $m")
+
   def initializeResult: Value = initResult
   def alive: Boolean          = deadReason.isEmpty
 
@@ -197,9 +203,13 @@ final class McpHttpClient private (
       case Result.Success(msg) => Result.succeed(Present(msg))
       case _ => Result.fail(s"MCP server '$serverName': unparseable JSON response (${text.take(200)})")
 
-  /** Folds the SSE stream, keeping the message whose id matches; other
-    * messages on the stream (server notifications/requests) are ignored. A
-    * compliant server closes the stream after the response, so the fold
+  /** Folds the SSE stream, keeping the message whose id matches our request.
+    * Server→client *requests* (a message carrying both `method` and `id` —
+    * `sampling/createMessage`, `elicitation/create`) are dispatched to
+    * `onServerRequest` and their reply POSTed back on a fiber, so the fold
+    * keeps draining while the server waits for our answer before completing
+    * our original request. Server notifications (method, no id) are ignored.
+    * A compliant server closes the stream after the response, so the fold
     * terminates; the request timeout bounds it regardless.
     */
   private def readSse(
@@ -209,13 +219,18 @@ final class McpHttpClient private (
     var pending  = Array.emptyByteArray
     var sseState = Sse.State.empty
     var found: Maybe[Value] = Absent
-    def take(events: List[Sse.Event]): Unit =
-      events.foreach { e =>
-        if found.isEmpty then
-          Jx.parse(e.data) match
-            case Result.Success(msg) if (msg / "id").asLong == expectId && (msg / "method").asStr.isEmpty =>
-              found = Present(msg)
-            case _ => ()
+    def handle(events: List[Sse.Event]): Unit < (Sync & Async) =
+      Kyo.foreachDiscard(events) { e =>
+        Jx.parse(e.data) match
+          case Result.Success(msg) =>
+            ((msg / "method").asStr, (msg / "id").asLong) match
+              case (Present(m), Present(rid)) =>
+                Fiber.initUnscoped(handleServerRequest(m, (msg / "params").getOrElse(Jx.obj()), rid)).unit
+              case (Present(_), Absent) => Sync.defer(()) // notification: ignore
+              case (Absent, msgId) =>
+                if found.isEmpty && msgId == expectId then found = Present(msg)
+                Sync.defer(())
+          case _ => Sync.defer(())
       }
     stream
       .foreach { span =>
@@ -223,17 +238,38 @@ final class McpHttpClient private (
         pending = rest
         val (events, next) = Sse.feed(sseState, text)
         sseState = next
-        take(events)
+        handle(events)
       }
       .map { _ =>
-        take(Sse.flush(sseState))
-        found match
-          case Present(msg) => Result.succeed(Present(msg))
-          case Absent =>
-            if expectId.isEmpty then Result.succeed(Absent)
-            else Result.fail(s"MCP server '$serverName': SSE stream ended without a response")
+        handle(Sse.flush(sseState)).map { _ =>
+          found match
+            case Present(msg) => Result.succeed(Present(msg))
+            case Absent =>
+              if expectId.isEmpty then Result.succeed(Absent)
+              else Result.fail(s"MCP server '$serverName': SSE stream ended without a response")
+        }
       }
   end readSse
+
+  /** Runs a server→client request through `onServerRequest` and POSTs the
+    * JSON-RPC reply back to the endpoint (fire-and-forget; a compliant server
+    * answers 202). */
+  private def handleServerRequest(method: String, params: Value, rid: Long): Unit < (Sync & Async) =
+    onServerRequest(method, params).map { result =>
+      val reply = result match
+        case Result.Success(v)   => jsonrpcResponse(rid, Present(v), Absent)
+        case Result.Failure(msg) => jsonrpcResponse(rid, Absent, Present((-32603L, msg)))
+        case Result.Panic(e)     => jsonrpcResponse(rid, Absent, Present((-32603L, String.valueOf(e.getMessage))))
+      post(Jx.render(reply), defaultTimeout, Absent).unit
+    }
+
+  private def jsonrpcResponse(id: Long, result: Maybe[Value], error: Maybe[(Long, String)]): Value =
+    Jx.objOf(
+      "jsonrpc" -> Present(Jx.str("2.0")),
+      "id"      -> Present(Jx.num(id)),
+      "result"  -> result,
+      "error"   -> error.map((code, msg) => Jx.obj("code" -> Jx.num(code), "message" -> Jx.str(msg)))
+    )
 
   private def collectText(stream: Stream[Span[Byte], Async]): String < (Sync & Async) =
     stream.fold(Array.emptyByteArray)((acc, span) => acc ++ span.toArray)
