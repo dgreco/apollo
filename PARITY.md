@@ -43,7 +43,7 @@ into a platform. Roughly ordered by value/effort.
 | ~~**`vision_analyze` tool**~~ | **Done** — analyzes an image file via an injected `VisionRunner`; new `vision` toolset. |
 | ~~**`execute_code` tool**~~ | **Done** — runs a snippet per language (python/node/ruby/bash/sh) via the terminal backend; `code_execution` toolset. |
 | ~~**`tool_search`**~~ | **Done** — keyword search over all registered tools (built-in + MCP); `tool_search` toolset. |
-| **Background auto-review** | Hermes forks an agent after each turn to *actually save* skills/memory; apollo's nudges only *remind*. |
+| ~~**Background auto-review**~~ | **Done** — `agent.auto_review` forks a background reviewer every `auto_review_interval` REPL turns that *actually saves* durable memories/skills via the memory/skill_manage tools (the nudges still only remind). Opt-in (spends a model call). |
 | ~~**MCP: sampling + elicitation**~~ | **Done (stdio)** — server-initiated `sampling/createMessage` (runs a model call) and `elicitation/create` (asks the user / declines) handled by `McpClient`. Still open: same for the **HTTP** transport, **MCP server mode**, legacy **SSE**. |
 | ~~**Provider OAuth**~~ | **Copilot done** — `apollo auth copilot login` (OAuth device-code) + GitHub→Copilot token exchange; `copilot` is now a resolvable provider. ⚠️ Reverse-engineered constants; the live flow needs hands-on validation. Still unsupported: ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini, MoA. |
 | ~~**Bedrock streaming**~~ | **Done** — `ConverseStream` decoded via `apollo.util.EventStream`; selected by `model.streaming`. |

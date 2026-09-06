@@ -1,6 +1,6 @@
 package apollo.cli
 
-import apollo.agent.{Agent, SystemPrompt, TurnCallbacks, TurnResult}
+import apollo.agent.{Agent, AutoReview, SystemPrompt, TurnCallbacks, TurnResult}
 import apollo.core.*
 import apollo.config.Fs
 import apollo.cron.{CronStore, CronJob, Schedule}
@@ -44,6 +44,7 @@ final class Repl(
   private var heartbeat: Maybe[Repl.Heartbeat] = Absent // /heartbeat — recurring prompt fired while idle
   private var asyncEnabled  = false                      // display.async_input && interactive
   private val turnRunning   = new java.util.concurrent.atomic.AtomicBoolean(false) // async mode
+  private var autoReviewState = AutoReview.State()                                  // agent.auto_review cadence
 
   /** Active tools grouped by their toolset, sorted — for the welcome banner. */
   private def toolGroups: List[(String, List[String])] =
@@ -152,7 +153,24 @@ final class Repl(
                 else if result.exitReason.startsWith("error") then
                   Console.printLine(Style.red(s"· ${result.exitReason}"))
                 else Sync.defer(())
+      _      <- maybeAutoReview(tools, result)
     yield result
+
+  /** After a completed turn, fork a background reviewer that actually saves
+    * durable memories/skills, on the `agent.auto_review` cadence. Fire-and-
+    * forget: failures never touch the user's turn. Skipped for interrupted or
+    * errored turns (nothing settled worth reviewing). */
+  private def maybeAutoReview(tools: List[String], result: TurnResult): Unit < (Sync & Async) =
+    val cfg = toolCtx.config
+    if !cfg.autoReviewEnabled || result.interrupted || result.exitReason.startsWith("error") then Sync.defer(())
+    else
+      val (next, due) = AutoReview.tick(autoReviewState, cfg.autoReviewInterval)
+      autoReviewState = next
+      val reviewTools = AutoReview.reviewToolNames(tools)
+      if !due || reviewTools.isEmpty then Sync.defer(())
+      else
+        Console.printLine(Style.dim("· auto-review: saving learnings in the background"))
+          .andThen(Fiber.initUnscoped(AutoReview.runOnce(runtime, toolCtx, store, agent.history, reviewTools)).unit)
 
   private def callbacks: TurnCallbacks =
     TurnCallbacks(

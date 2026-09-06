@@ -119,6 +119,11 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def promptCacheEnabled: Boolean =
     at("prompt_cache", "enabled").flatMap(_.bool)
       .orElse(at("agent", "prompt_cache").flatMap(_.bool)).getOrElse(true)
+  /** `agent.auto_review`: after every `auto_review_interval` REPL turns, fork a
+    * background reviewer that actually saves durable memories/skills (vs the
+    * nudges, which only remind). Opt-in — it spends an extra model call. */
+  def autoReviewEnabled: Boolean  = at("agent", "auto_review").flatMap(_.bool).getOrElse(false)
+  def autoReviewInterval: Int     = at("agent", "auto_review_interval").flatMap(_.int).getOrElse(5).max(1)
   def reasoningEffort: String     = strAt("agent", "reasoning_effort").getOrElse("medium")
   def reasoningOverrides: List[(String, String)] =
     at("agent", "reasoning_overrides").flatMap(_.entries).getOrElse(Nil)
