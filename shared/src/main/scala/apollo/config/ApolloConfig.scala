@@ -315,6 +315,24 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
     strAt("stt", "api_base").orElse(env.get("STT_API_BASE")).getOrElse("https://api.openai.com/v1")
   def sttModel: String = strAt("stt", "model").orElse(env.get("STT_MODEL")).getOrElse("whisper-1")
 
+  // Secrets managers (`secrets.*`). Ordered sources resolved at startup and
+  // injected into the env (gap-fill by default; fail-open). Mirrors Hermes.
+  def secretsSources: List[String] =
+    at("secrets", "sources").flatMap(_.strings).getOrElse(Nil).map(_.toLowerCase)
+  /** `secrets.onepassword.env`: ENV_VAR -> `op://vault/item/field` reference. */
+  def secretsOnePasswordEnv: List[(String, String)] =
+    at("secrets", "onepassword", "env").flatMap(_.entries).getOrElse(Nil)
+      .flatMap((k, v) => v.str.map(k -> _).toList)
+  /** `secrets.command.env`: ENV_VAR -> a command whose stdout is the value. */
+  def secretsCommandEnv: List[(String, String)] =
+    at("secrets", "command", "env").flatMap(_.entries).getOrElse(Nil)
+      .flatMap((k, v) => v.str.map(k -> _).toList)
+  /** `secrets.bitwarden.project`: a Bitwarden Secrets Manager project id. */
+  def secretsBitwardenProject: Maybe[String] = strAt("secrets", "bitwarden", "project").filter(_.nonEmpty)
+  def secretsOverrideExisting: Boolean = at("secrets", "override_existing").flatMap(_.bool).getOrElse(false)
+  def opBinary: String  = strAt("secrets", "onepassword", "binary").getOrElse("op")
+  def bwsBinary: String = strAt("secrets", "bitwarden", "binary").getOrElse("bws")
+
   // --- toolsets -----------------------------------------------------------
 
   def platformToolsets(platform: String): Maybe[List[String]] =

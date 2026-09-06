@@ -53,9 +53,9 @@ object Cli:
               case Present(err) =>
                 Console.printLineErr(
                   Style.red(s"warning: ${paths.configYaml} unparseable ($err); using defaults")
-                ).andThen(dispatch(args, config, paths))
+                ).andThen(apollo.config.Secrets.applyTo(config).map(c => dispatch(args, c, paths)))
               case Absent =>
-                dispatch(args, config, paths)
+                apollo.config.Secrets.applyTo(config).map(c => dispatch(args, c, paths))
           }
       }
 
@@ -73,6 +73,7 @@ object Cli:
       case "gateway"  => apollo.gateway.Gateway.command(args.commandArgs, config, paths)
       case "mcp"      => Commands.mcp(args, config, paths)
       case "auth"     => Commands.auth(args, config, paths)
+      case "secrets"  => Commands.secrets(args, config, paths)
       case "memory"   => Commands.memory(paths)
       case "logs"     => Console.printLine(s"session transcripts: ${paths.home.resolve("scala-state").resolve("sessions")}")
       case "version"  => Console.printLine(s"apollo $version")

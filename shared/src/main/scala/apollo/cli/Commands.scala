@@ -1,6 +1,6 @@
 package apollo.cli
 
-import apollo.config.{Fs, ApolloConfig, ApolloPaths}
+import apollo.config.{Fs, ApolloConfig, ApolloPaths, Secrets}
 import apollo.config.Yaml.*
 import apollo.cron.CronStore
 import apollo.provider.{CopilotAuth, Profiles, QwenAuth, ResolveError, Runtime, RuntimeOverrides}
@@ -315,6 +315,31 @@ object Commands:
           CopilotAuth.saveGithubToken(paths, tok).andThen(
             Console.printLine(Style.green("copilot: logged in — use  -m copilot:<model>  (e.g. copilot:gpt-4o)")))
       }
+
+  /** `apollo secrets [status|resolve]` — configured secret sources + a dry-run
+    * resolution (values masked). */
+  def secrets(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    args.commandArgs.headOption.getOrElse("status") match
+      case "resolve" | "test" =>
+        if config.secretsSources.isEmpty then Console.printLine("secrets: no sources configured (set secrets.sources)")
+        else
+          Console.printLine(s"secrets: resolving ${config.secretsSources.mkString(", ")}…").andThen {
+            Secrets.resolveAll(config).map { additions =>
+              if additions.isEmpty then Console.printLine("secrets: resolved nothing (already set, or sources unavailable)")
+              else Console.printLine(additions.keys.toList.sorted
+                .map(k => s"  $k = ${mask(additions(k))}").mkString("resolved:\n", "\n", ""))
+            }
+          }
+      case _ =>
+        val lines = List(
+          s"sources: ${if config.secretsSources.isEmpty then "(none)" else config.secretsSources.mkString(", ")}",
+          s"onepassword refs: ${config.secretsOnePasswordEnv.map(_._1).sorted.mkString(", ")}",
+          s"command vars: ${config.secretsCommandEnv.map(_._1).sorted.mkString(", ")}",
+          s"bitwarden project: ${config.secretsBitwardenProject.getOrElse("(none)")}")
+        Console.printLine(lines.mkString("\n"))
+
+  private def mask(v: String): String =
+    if v.length <= 4 then "****" else v.take(2) + "…" + v.takeRight(2) + s" (${v.length} chars)"
 
   private def qwenLogin(paths: ApolloPaths): Unit < (Sync & Async) =
     QwenAuth.deviceStart().map {
