@@ -102,15 +102,15 @@ Qwen**, plus Vertex/Azure via `model.key_cmd`), the **guards** (repetition /
 empty-response / prompt-cache), **background auto-review**, and **more terminal
 backends** (singularity + generic `exec`).
 
-**Group B (breadth) is built too**: `image_generate`, Skills Hub, **browser
-automation** (CDP over WebSocket), and gateway platforms **Matrix, WhatsApp Cloud,
-and Twilio SMS**.
+**Group B (breadth) is built too**: `image_generate`, **`video_generate`**, Skills
+Hub, **browser automation** (CDP over WebSocket), and gateway platforms **Matrix,
+WhatsApp Cloud, Twilio SMS, MS Teams, iMessage, and email** (email is JVM-only —
+see above).
 
 Still open (deliberately, or larger): MCP **server mode** + legacy HTTP+SSE
 transport; OAuth for **ChatGPT/Codex** (loopback-PKCE broker), **xAI**, native
-Gemini, MoA; email (IMAP/SMTP) / Teams / iMessage gateways; video generation; and
-live validation of the reverse-engineered Copilot/Qwen and Bedrock-stream flows.
-Group C stays out of scope (platform, not core agent).
+Gemini, MoA; and live validation of the reverse-engineered Copilot/Qwen and
+Bedrock-stream flows. Group C stays out of scope (platform, not core agent).
 
 ## Method / reproducing this audit
 
