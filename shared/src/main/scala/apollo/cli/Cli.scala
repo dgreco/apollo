@@ -76,6 +76,7 @@ object Cli:
       case "secrets"  => Commands.secrets(args, config, paths)
       case "monitoring" => Commands.monitoring(args, config, paths)
       case "lsp"      => Commands.lsp(args, config, paths)
+      case "acp"      => apollo.acp.AcpServer.run(config, paths)
       case "memory"   => Commands.memory(paths)
       case "logs"     => Console.printLine(s"session transcripts: ${paths.home.resolve("scala-state").resolve("sessions")}")
       case "version"  => Console.printLine(s"apollo $version")

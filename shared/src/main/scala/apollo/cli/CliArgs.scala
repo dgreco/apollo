@@ -34,7 +34,7 @@ object CliArgs:
   val subcommands: Set[String] = Set(
     "chat", "model", "config", "sessions", "skills", "cron", "gateway", "setup",
     "status", "tools", "help", "version", "doctor", "memory", "logs", "mcp",
-    "auth", "secrets", "monitoring", "lsp"
+    "auth", "secrets", "monitoring", "lsp", "acp"
   )
 
   def parse(argv: List[String]): CliArgs =
