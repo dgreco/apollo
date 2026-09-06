@@ -48,7 +48,7 @@ into a platform. Roughly ordered by value/effort.
 | ~~**Provider OAuth**~~ | **Copilot done** — `apollo auth copilot login` (OAuth device-code) + GitHub→Copilot token exchange; `copilot` is now a resolvable provider. ⚠️ Reverse-engineered constants; the live flow needs hands-on validation. Still unsupported: ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini, MoA. |
 | ~~**Bedrock streaming**~~ | **Done** — `ConverseStream` decoded via `apollo.util.EventStream`; selected by `model.streaming`. |
 | ~~**Guards**~~ | **Done** — repetition guard (breaks a turn on `agent.repetition_limit` identical tool calls), empty-response guard (re-prompts `agent.empty_response_retries` times, then exits `empty_response`), and Anthropic prompt-cache breakpoints on system+tools+rolling-last-message (`prompt_cache.enabled`). |
-| **More terminal backends** | Hermes has 7 (local/docker/ssh + singularity/modal/daytona/vercel-sandbox); apollo has 3. |
+| ~~**More terminal backends**~~ | **Done** — added `singularity`/`apptainer` (HPC container exec) and a generic `exec`/`custom` backend that prefixes commands with any user-configured sandbox CLI argv (podman, kubectl, nsjail, or a cloud sandbox's own CLI — modal/daytona/vercel — reached this way rather than via each vendor SDK). Now: local/docker/ssh/singularity/exec. |
 
 ## Group B — breadth features (bigger; arguably in-scope)
 

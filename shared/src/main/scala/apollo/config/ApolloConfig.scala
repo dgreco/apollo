@@ -200,6 +200,28 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def terminalSshExtraArgs: List[String] =
     at("terminal", "ssh", "extra_args").flatMap(_.strings).getOrElse(Nil)
 
+  /** Singularity/Apptainer backend (`terminal.backend: singularity`): exec
+    * inside a container image via the `singularity`/`apptainer` CLI (HPC
+    * container runtime). `image` (a SIF path or URI) is required. */
+  def terminalSingularityImage: Maybe[String] =
+    strAt("terminal", "singularity", "image").filter(_.nonEmpty)
+      .orElse(env.get("TERMINAL_SINGULARITY_IMAGE").filter(_.nonEmpty))
+  def terminalSingularityBinary: String =
+    strAt("terminal", "singularity", "binary").filter(_.nonEmpty).getOrElse("singularity")
+  def terminalSingularityExtraArgs: List[String] =
+    at("terminal", "singularity", "extra_args").flatMap(_.strings).getOrElse(Nil)
+
+  /** Generic exec backend (`terminal.backend: exec`): prefix every command
+    * with a user-configured argv, so any sandbox CLI works without a bespoke
+    * backend — podman, kubectl, nsjail/firejail/bwrap, or a cloud sandbox
+    * (modal/daytona/vercel) via its own CLI. apollo appends `sh -c '<cmd>'`
+    * unless `raw` is set, when it appends the command as a single verbatim arg.
+    */
+  def terminalExecArgv: List[String] =
+    at("terminal", "exec", "argv").flatMap(_.strings).getOrElse(Nil)
+  def terminalExecRaw: Boolean =
+    at("terminal", "exec", "raw").flatMap(_.bool).getOrElse(false)
+
   // --- compression --------------------------------------------------------
 
   def compressionEnabled: Boolean   = at("compression", "enabled").flatMap(_.bool).getOrElse(true)

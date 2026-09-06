@@ -164,8 +164,36 @@ object TerminalTools:
             val argv = List("ssh", "-T", "-o", "BatchMode=yes") ++ config.terminalSshExtraArgs ++
               portArg ++ keyArg ++ List(target, "sh", "-c", remote)
             Right(Command(argv*).redirectErrorStream(true))
+      case "singularity" | "apptainer" =>
+        config.terminalSingularityImage match
+          case Absent =>
+            Left("terminal.backend is 'singularity' but terminal.singularity.image is not set " +
+              "(name a SIF/image, or set TERMINAL_SINGULARITY_IMAGE).")
+          case Present(image) =>
+            Right(Command(singularityArgv(
+              config.terminalSingularityBinary, config.terminalSingularityExtraArgs, image, cmd)*)
+              .redirectErrorStream(true))
+      case "exec" | "custom" =>
+        val prefix = config.terminalExecArgv
+        if prefix.isEmpty then
+          Left("terminal.backend is 'exec' but terminal.exec.argv is empty (set the sandbox CLI " +
+            "prefix, e.g. [\"podman\",\"exec\",\"box\"] or [\"kubectl\",\"exec\",\"pod\",\"--\"]).")
+        else
+          Right(Command(execArgv(prefix, config.terminalExecRaw, cmd)*).redirectErrorStream(true))
       case other =>
-        Left(s"unsupported terminal.backend '$other' (this build implements 'local', 'docker', and 'ssh')")
+        Left(s"unsupported terminal.backend '$other' (this build implements 'local', 'docker', " +
+          "'ssh', 'singularity'/'apptainer', and 'exec'/'custom')")
+
+  /** `singularity exec [extra] <image> sh -c '<cmd>'` — pure argv builder. */
+  private[tools] def singularityArgv(
+      binary: String, extra: List[String], image: String, cmd: String
+  ): List[String] =
+    List(binary, "exec") ++ extra ++ List(image, "sh", "-c", cmd)
+
+  /** Generic exec backend argv: the configured prefix, then either the command
+    * as a single verbatim arg (`raw`) or wrapped in `sh -c '<cmd>'`. */
+  private[tools] def execArgv(prefix: List[String], raw: Boolean, cmd: String): List[String] =
+    if raw then prefix :+ cmd else prefix ++ List("sh", "-c", cmd)
 
   /** POSIX single-quote a value for safe embedding in a remote shell string. */
   private def shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"

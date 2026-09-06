@@ -112,4 +112,48 @@ class TerminalBackendSuite extends munit.FunSuite:
       case Left(err) => assert(err.contains("unsupported terminal.backend 'modal'"), err)
       case Right(_)  => fail("expected an error")
   }
+
+  test("singularity backend execs into the configured image (apptainer alias too)") {
+    val cfg = config(
+      """terminal:
+        |  backend: singularity
+        |  singularity: {image: /sifs/app.sif, extra_args: ["--nv"]}
+        |""".stripMargin)
+    assertEquals(argv(cfg), List("singularity", "exec", "--nv", "/sifs/app.sif", "sh", "-c", "echo hi"))
+    // alias + custom binary + env-provided image
+    val cfg2 = config(
+      """terminal: {backend: apptainer, singularity: {binary: apptainer}}""",
+      env = Map("TERMINAL_SINGULARITY_IMAGE" -> "docker://alpine"))
+    assertEquals(argv(cfg2), List("apptainer", "exec", "docker://alpine", "sh", "-c", "echo hi"))
+  }
+
+  test("singularity backend without an image is a clear error") {
+    TerminalTools.backendCommand("echo hi", wd, config("terminal: {backend: singularity}")) match
+      case Left(err) => assert(err.contains("terminal.singularity.image is not set"), err)
+      case Right(_)  => fail("expected an error")
+  }
+
+  test("exec backend prefixes a configurable sandbox CLI (wrapped and raw)") {
+    val wrapped = config(
+      """terminal:
+        |  backend: exec
+        |  exec: {argv: ["kubectl", "exec", "pod", "--"]}
+        |""".stripMargin)
+    assertEquals(argv(wrapped), List("kubectl", "exec", "pod", "--", "sh", "-c", "echo hi"))
+    val raw = config(
+      """terminal:
+        |  backend: exec
+        |  exec: {argv: ["modal", "run", "runner.py", "--cmd"], raw: true}
+        |""".stripMargin)
+    assertEquals(argv(raw), List("modal", "run", "runner.py", "--cmd", "echo hi"))
+    // `custom` is an accepted alias of `exec`
+    val custom = config("""terminal: {backend: custom, exec: {argv: ["podman", "exec", "box"]}}""")
+    assertEquals(argv(custom), List("podman", "exec", "box", "sh", "-c", "echo hi"))
+  }
+
+  test("exec backend without an argv prefix is a clear error") {
+    TerminalTools.backendCommand("echo hi", wd, config("terminal: {backend: exec}")) match
+      case Left(err) => assert(err.contains("terminal.exec.argv is empty"), err)
+      case Right(_)  => fail("expected an error")
+  }
 end TerminalBackendSuite
