@@ -22,11 +22,9 @@ object PlatformEditor:
   // ANSI escape building blocks (Esc = 0x1B), kept as a named char so the
   // source has no invisible control bytes.
   private val Esc      = 27.toChar
-  private val ClrEol   = s"$Esc[K"       // clear to end of line
   private val ClrBelow = s"$Esc[J"       // clear to end of screen
-  private val SaveCur  = s"${Esc}7"      // DECSC save cursor
-  private val RestCur  = s"${Esc}8"      // DECRC restore cursor
   private def back(n: Int) = s"$Esc[${n}D" // move cursor left n columns
+  private def up(n: Int)   = s"$Esc[${n}A" // move cursor up n rows (relative, scroll-safe)
   private val Dim      = s"$Esc[2m"      // dim text
   private val Rst      = s"$Esc[0m"      // reset attributes
 
@@ -106,8 +104,9 @@ object PlatformEditor:
           val b     = buffer.length - cursor
           curPrompt = prompt; curLine = shown; curBack = b; curMask = mask // for a concurrent printAbove
           // Live command menu: filtered matches drawn below the input line while
-          // typing a slash command. The whole region is cleared each redraw with
-          // ClrBelow; the cursor is saved/restored around the menu (SaveCur/RestCur).
+          // typing a slash command. The whole region (input line + menu) is
+          // cleared each redraw with ClrBelow; after drawing the menu the cursor
+          // returns to the input line via a relative cursor-up (scroll-safe).
           val menu =
             if menuEnabled && !mask then
               ReplCommands.formatMenu(ReplCommands.completeSlash(buffer.mkString), 6).map(_.take(78))
@@ -115,11 +114,14 @@ object PlatformEditor:
           val sb = new StringBuilder
           sb.append("\r").append(ClrBelow).append(prompt).append(shown)
           if menu.nonEmpty then
-            sb.append(SaveCur)                                           // save cursor at input-line end
+            // Draw the framed window below, then return to the input line with a
+            // RELATIVE cursor-up (scroll-safe — save/restore breaks when typing
+            // at the bottom of the screen because the newlines scroll it).
             sb.append("\n").append(s"$Dim  ╭─ commands ─ Tab completes · Enter runs$Rst")
             menu.foreach(l => sb.append("\n").append(s"$Dim  │$Rst").append(l))
             sb.append("\n").append(s"$Dim  ╰─$Rst")
-            sb.append(RestCur)                                          // back to input-line end
+            sb.append(up(menu.length + 2))              // header + items + footer
+            sb.append("\r").append(prompt).append(shown) // reposition to input-line end
           if b > 0 then sb.append(back(b))
           print(sb.toString)
           java.lang.System.out.flush()
