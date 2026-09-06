@@ -3,6 +3,8 @@ package apollo.cli
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
 import apollo.config.*
 import apollo.core.{Message, Content, Role}
+import apollo.util.Jx.*
+import kyo.Structure.Value
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore}
 import apollo.skills.SkillStore
@@ -145,6 +147,10 @@ object Cli:
       // session. An explicit -t list acts as the upstream server allowlist.
       _             <- apollo.mcp.McpManager.start(config, paths, cwd,
                          args.toolsets.map(_.toList), version)
+      // Server→client MCP requests: sampling runs a model call; elicitation asks
+      // the user (declines when non-interactive).
+      _              = apollo.mcp.McpManager.setSamplingHandler(mcpSamplingHandler(runtime))
+      _              = apollo.mcp.McpManager.setElicitationHandler(mcpElicitationHandler(editor))
       toolCtx        = ToolContext(
                          config = config,
                          paths = paths,
@@ -268,6 +274,38 @@ object Cli:
         yield
           if result.finalResponse.nonEmpty then result.finalResponse.take(24000)
           else s"[vision call ended: ${result.exitReason}]"
+
+  /** Backs MCP `sampling/createMessage`: one non-streaming model call with the
+    * server-supplied messages, returned in the MCP result shape. */
+  private def mcpSamplingHandler(runtime: ResolvedRuntime): Value => Result[String, Value] < (Sync & Async) =
+    params =>
+      val msgs = apollo.mcp.McpSampling.parseMessages(params)
+      val rt   = runtime.copy(streaming = false, maxTokens = apollo.mcp.McpSampling.maxTokens(params).orElse(runtime.maxTokens))
+      WireTransport.forMode(rt.apiMode) match
+        case Result.Success(transport) =>
+          val req = TurnRequest(rt, apollo.mcp.McpSampling.systemPrompt(params), msgs, Nil)
+          Abort.run[ProviderError](transport.streamTurn(req)(_ => ())).map {
+            case Result.Success(resp) =>
+              val text = resp.message.content.collect { case Content.Text(t) => t }.mkString
+              Result.succeed(apollo.mcp.McpSampling.result(text, rt.model))
+            case Result.Failure(e) => Result.fail(s"sampling failed: ${e.getMessage}")
+            case Result.Panic(e)   => Result.fail(s"sampling failed: ${String.valueOf(e.getMessage)}")
+          }
+        case _ => Result.fail(s"sampling: no transport for ${rt.apiMode}")
+
+  /** Backs MCP `elicitation/create`: asks the user (interactive) or declines. */
+  private def mcpElicitationHandler(editor: LineEditor): Value => Result[String, Value] < (Sync & Async) =
+    params =>
+      val message = (params / "message").asStr.getOrElse("The MCP server is requesting input.")
+      editor.isInteractive.map { interactive =>
+        if !interactive then Result.succeed(apollo.mcp.McpElicitation.decline)
+        else
+          editor.readLine(s"[MCP wants input] $message\n> ").map {
+            case Present(answer) if answer.trim.nonEmpty =>
+              Result.succeed(apollo.mcp.McpElicitation.accept(apollo.mcp.McpElicitation.singleStringField(params).getOrElse("value"), answer.trim))
+            case _ => Result.succeed(apollo.mcp.McpElicitation.cancel)
+          }
+      }
 
   private def runOneShot(session: Session, prompt: String): Unit < (Sync & Async) =
     for

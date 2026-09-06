@@ -37,6 +37,27 @@ object McpManager:
   /** Session-scoped grants for `trust: untrusted` servers. */
   private val trustGrants = new java.util.concurrent.ConcurrentHashMap[String, Boolean]()
 
+  // Handlers for server→client requests, wired by the CLI layer (a model call
+  // for sampling; the UI for elicitation). Absent → the method is unsupported.
+  import kyo.Structure.Value
+  @volatile private var samplingHandler:    Maybe[Value => Result[String, Value] < (Sync & Async)] = Absent
+  @volatile private var elicitationHandler: Maybe[Value => Result[String, Value] < (Sync & Async)] = Absent
+  def setSamplingHandler(f: Value => Result[String, Value] < (Sync & Async)): Unit    = samplingHandler = Present(f)
+  def setElicitationHandler(f: Value => Result[String, Value] < (Sync & Async)): Unit = elicitationHandler = Present(f)
+
+  /** Routes a server→client request to the wired handler. */
+  private[mcp] def dispatchServerRequest(method: String, params: Value): Result[String, Value] < (Sync & Async) =
+    method match
+      case "sampling/createMessage" =>
+        samplingHandler match
+          case Present(f) => f(params)
+          case Absent     => Result.fail("sampling/createMessage not supported (no handler wired)")
+      case "elicitation/create" =>
+        elicitationHandler match
+          case Present(f) => f(params)
+          case Absent     => Result.fail("elicitation/create not supported (no handler wired)")
+      case other => Result.fail(s"method not supported: $other")
+
   def status: List[ServerStatus] =
     import scala.jdk.CollectionConverters.*
     servers.values.asScala.toList.sortBy(_.config.name)
@@ -126,6 +147,8 @@ object McpManager:
               case Result.Success(stdio: McpClient) =>
                 // Live registry refresh on tools/list_changed notifications.
                 stdio.onToolsListChanged = () => handle.refreshTools()
+                // Server→client requests (sampling/elicitation) route to the wired handlers.
+                stdio.onServerRequest = (m, p) => dispatchServerRequest(m, p)
               case _ => ()
             r
           },

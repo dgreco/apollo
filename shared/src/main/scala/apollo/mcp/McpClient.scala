@@ -59,6 +59,12 @@ final class McpClient private (
     */
   @volatile private[mcp] var onToolsListChanged: () => Unit < Sync = () => ()
 
+  /** Handles a server→client request (sampling/createMessage, elicitation/create).
+    * Set by the manager; defaults to "not supported" so unwired methods are
+    * refused politely. */
+  @volatile private[mcp] var onServerRequest: (String, Value) => Result[String, Value] < (Sync & Async) =
+    (m, _) => Result.fail(s"method not supported: $m")
+
   def alive: Boolean = deadReason.isEmpty
 
   /** Sends one request and waits for its response (result object), failing
@@ -127,6 +133,14 @@ final class McpClient private (
       Result.succeed(())
     catch case e: java.io.IOException => Result.fail(s"MCP server '$serverName': write failed (${e.getMessage})")
 
+  /** Write a JSON-RPC success reply to a server→client request. */
+  private def replyResult(id: Value, result: Value): Unit =
+    writeLine(Jx.render(Jx.obj("jsonrpc" -> Jx.str("2.0"), "id" -> id, "result" -> result))); ()
+  /** Write a JSON-RPC error reply to a server→client request. */
+  private def replyError(id: Value, code: Long, message: String): Unit =
+    writeLine(Jx.render(Jx.obj("jsonrpc" -> Jx.str("2.0"), "id" -> id,
+      "error" -> Jx.obj("code" -> Jx.num(code), "message" -> Jx.str(message))))); ()
+
   // --- inbound ------------------------------------------------------------
 
   private[mcp] def handleLine(line: String): Unit < Sync =
@@ -161,11 +175,19 @@ final class McpClient private (
                 case Present(other) =>
                   (msg / "id") match
                     case Present(id) =>
-                      // Unsupported server→client request: refuse politely.
-                      Sync.defer(writeLine(Jx.render(Jx.obj(
-                        "jsonrpc" -> Jx.str("2.0"), "id" -> id,
-                        "error" -> Jx.obj("code" -> Jx.num(-32601L), "message" -> Jx.str(s"method not supported: $other"))
-                      )))).unit
+                      if other == "sampling/createMessage" || other == "elicitation/create" then
+                        // Handle asynchronously (a sampling call runs the model) so the
+                        // read loop keeps draining; write the JSON-RPC reply when done.
+                        val params = (msg / "params").getOrElse(Jx.obj())
+                        Fiber.initUnscoped(
+                          onServerRequest(other, params).map {
+                            case Result.Success(res) => Sync.defer(replyResult(id, res))
+                            case Result.Failure(err) => Sync.defer(replyError(id, -32603L, err))
+                          }
+                        ).unit
+                      else
+                        // Unsupported server→client request: refuse politely.
+                        Sync.defer(replyError(id, -32601L, s"method not supported: $other")).unit
                     case Absent =>
                       if other == "notifications/tools/list_changed" then onToolsListChanged()
                       else Sync.defer(())

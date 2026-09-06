@@ -44,7 +44,7 @@ into a platform. Roughly ordered by value/effort.
 | ~~**`execute_code` tool**~~ | **Done** — runs a snippet per language (python/node/ruby/bash/sh) via the terminal backend; `code_execution` toolset. |
 | ~~**`tool_search`**~~ | **Done** — keyword search over all registered tools (built-in + MCP); `tool_search` toolset. |
 | **Background auto-review** | Hermes forks an agent after each turn to *actually save* skills/memory; apollo's nudges only *remind*. |
-| **MCP: sampling + elicitation** | server-initiated `sampling/createMessage` + elicitation; plus **MCP server mode** (expose apollo's tools as MCP) and the legacy **SSE** transport. |
+| ~~**MCP: sampling + elicitation**~~ | **Done (stdio)** — server-initiated `sampling/createMessage` (runs a model call) and `elicitation/create` (asks the user / declines) handled by `McpClient`. Still open: same for the **HTTP** transport, **MCP server mode**, legacy **SSE**. |
 | **Provider OAuth** | Copilot, ChatGPT/Codex, xAI, Qwen, Vertex, Azure Entra, native Gemini `generateContent`, and the **MoA** virtual provider — apollo currently marks these unsupported. |
 | ~~**Bedrock streaming**~~ | **Done** — `ConverseStream` decoded via `apollo.util.EventStream`; selected by `model.streaming`. |
 | **Guards** | repetition guard, empty-response guard, prompt-cache boundary management. |
