@@ -350,13 +350,20 @@ object Cli:
        |  model          show the resolved provider/model
        |  config         show config / paths (get <key>, path)
        |  sessions       list stored sessions
+       |  memory         print MEMORY.md and USER.md
        |  skills         list installed skills
+       |  tools          list toolsets and tools
        |  cron           list scheduled jobs (run-scheduler to start the tick loop)
        |  mcp            list configured MCP servers (test <name> probes one)
+       |  auth           provider OAuth: <copilot|qwen> [login|status|logout]
+       |  secrets        secret sources: status | resolve (values masked)
+       |  monitoring     observability / OTLP export status
+       |  lsp            configured language servers
+       |  acp            run the Agent Client Protocol server (editor integration)
        |  gateway        run the messaging gateway (telegram / api server / webhook)
        |  setup          interactive provider setup wizard
-       |  status         configuration health check
-       |  tools          list toolsets and tools
+       |  status         configuration health check (alias: doctor)
+       |  logs           show the session transcripts directory
        |
        |Flags:
        |  -z, --oneshot PROMPT   one-shot: print the final response and exit
