@@ -30,9 +30,10 @@ C4Context
 
   System_Ext(provider, "Model provider", "OpenAI/Anthropic/Bedrock/… over HTTPS")
   System_Ext(mcp, "MCP servers", "Tool servers over stdio or streamable HTTP")
-  System_Ext(chat, "Chat platforms", "Telegram Bot API / Discord Gateway / Slack Socket Mode")
+  System_Ext(chat, "Chat platforms", "Telegram / Discord / Slack / Matrix / WhatsApp / SMS / Teams / iMessage / email")
   System_Ext(exec, "Execution targets", "Local shell, a Docker container, or an SSH host")
   System_Ext(web, "Web search", "Brave Search API")
+  System_Ext(otlp, "Telemetry backend", "OTLP/HTTP collector — Jaeger / Prometheus / Grafana")
 
   Rel(operator, apollo, "REPL / one-shot / subcommands")
   Rel(chatUser, chat, "Messages")
@@ -41,6 +42,7 @@ C4Context
   Rel(apollo, mcp, "initialize / tools/list / tools/call")
   Rel(apollo, exec, "Runs shell commands")
   Rel(apollo, web, "Search / fetch")
+  Rel(apollo, otlp, "OTLP traces / metrics / logs (opt-in)")
 ```
 
 - The **operator** drives apollo directly (REPL, `-z` one-shot, subcommands like
@@ -63,12 +65,13 @@ C4Container
   Person(chatUser, "Chat user")
 
   System_Boundary(apollo, "apollo process") {
-    Container(cli, "CLI / REPL", "Scala", "Arg parsing, REPL, setup wizard, subcommands, line editor")
-    Container(gateway, "Gateway", "Scala + kyo-http", "Telegram/Discord/Slack + OpenAI API + webhook + cron; SessionHub")
+    Container(cli, "CLI / REPL", "Scala", "Arg parsing, REPL, setup wizard, subcommands, line editor; ACP server")
+    Container(gateway, "Gateway", "Scala + kyo-http", "8 chat platforms + OpenAI API + webhook + cron; SessionHub")
     Container(agent, "Agent core", "Scala + Kyo", "Conversation loop, alternation repair, compression, nudges, system prompt")
     Container(providers, "Provider layer", "Scala", "Runtime resolution + wire transports (4 protocols)")
     Container(tools, "Tool layer", "Scala", "Built-in tools, toolsets, approval gating")
     Container(mcp, "MCP subsystem", "Scala", "stdio/HTTP clients, OAuth, reliability supervisor, dynamic registry")
+    Container(obs, "Observability", "Scala + kyo.Log/stats", "Per-turn traces, metrics, logs; OTLP/HTTP export")
     ContainerDb(config, "Config + home", "YAML/.env files", "Resolution, profiles, managed scope")
     ContainerDb(store, "Session store", "JSONL + JSON + SQLite", "Transcripts, index, FTS5 search")
   }
@@ -90,17 +93,19 @@ C4Container
   Rel(cli, config, "load")
   Rel(gateway, config, "load")
   Rel(agent, store, "append / rewrite / search")
+  Rel(agent, obs, "spans / metrics / logs per turn")
 ```
 
 | Container | Package(s) | Responsibility |
 |---|---|---|
-| **CLI / REPL** | `apollo.cli`, `apollo.Main` | Parse args, dispatch subcommands, run the REPL or one-shot, host the setup wizard and (platform-split) line editor. |
-| **Gateway** | `apollo.gateway` | Host chat connectors + HTTP API + webhook + cron in one `Async.gather`; `SessionHub` owns one agent per conversation, serialized by a per-session mutex. |
-| **Agent core** | `apollo.agent`, `apollo.core` | The conversation loop and its invariants: alternation repair, persist-before-execute, retries + fallback, compression, nudges, system-prompt assembly. |
-| **Provider layer** | `apollo.provider` | Resolve `config` → a `ResolvedRuntime`; translate the internal message model to/from each provider's wire format; sign (SigV4), stream (SSE), retry. |
-| **Tool layer** | `apollo.tools` | The built-in tool registry, toolset resolution, and the shell-command approval gate. |
-| **MCP subsystem** | `apollo.mcp` | Spawn/connect MCP servers, OAuth, keep them alive (reliability ladder), and register their tools dynamically into the tool registry. |
-| **Config + home** | `apollo.config` | Home/profile resolution, env layering, YAML parsing, managed scope, `${VAR}` expansion. |
+| **CLI / REPL** | `apollo.cli`, `apollo.Main`, `apollo.acp` | Parse args, dispatch subcommands, run the REPL or one-shot, host the setup wizard and (platform-split) line editor. Also hosts the **ACP** server (`apollo acp`) for editor integration (VS Code / Zed / JetBrains). |
+| **Gateway** | `apollo.gateway` | Host chat connectors (Telegram, Discord, Slack, Matrix, WhatsApp, SMS, Teams, iMessage, email) + HTTP API + webhook + cron in one `Async.gather`; `SessionHub` owns one agent per conversation, serialized by a per-session mutex. |
+| **Agent core** | `apollo.agent`, `apollo.core` | The conversation loop and its invariants: alternation repair, persist-before-execute, retries + fallback, compression, loop guards (repetition / empty-response), nudges, auto-checkpoint, background auto-review, system-prompt assembly. |
+| **Provider layer** | `apollo.provider` | Resolve `config` → a `ResolvedRuntime`; translate the internal message model to/from each provider's wire format; sign (SigV4), stream (SSE), retry. `copilot`/`qwen` OAuth brokers live here. |
+| **Tool layer** | `apollo.tools` | The built-in tool registry, toolset resolution, and the shell-command approval gate. Includes browser (CDP), computer-use, voice/image/video, checkpoints, kanban, and the **LSP** client tool (`apollo.lsp`). |
+| **MCP subsystem** | `apollo.mcp` | Spawn/connect MCP servers, OAuth, keep them alive (reliability ladder), register their tools dynamically, and serve server→client **sampling / elicitation** requests. |
+| **Observability** | `apollo.obs` | A content-free per-turn trace tree (`agent.turn → llm.call → tool.*`), cumulative metrics (`kyo-stats` histograms + counters), and structured logs (`kyo.Log`); `/trace` + `/metrics` in the REPL and fire-and-forget OTLP/HTTP export. |
+| **Config + home** | `apollo.config` | Home/profile resolution, env layering, YAML parsing, managed scope, `${VAR}` expansion, secret-source resolution. |
 | **Session store** | `apollo.session` | JSONL transcripts + a JSON index under `scala-state/`; FTS5 search on the JVM, transcript scan on Native. |
 
 ---
@@ -271,6 +276,14 @@ or `Future`.
   (`apollo.session.PlatformSearch`) are platform-split. Security primitives
   (SHA-256/HMAC/PKCE in `apollo.util.Crypto`) are pure Scala so they behave
   identically on Native, where `java.security` is unavailable.
+- **Observability.** The `Agent` builds a `TraceContext` per turn — a span tree
+  (`agent.turn` → `llm.call` → `tool.*` / `compress`) collected in memory (cheap,
+  always on, so `/trace` and `/metrics` work with no config). Metrics use the Kyo
+  stats registry (histograms) plus cumulative `AtomicLong` counters — the
+  registry's `Counter.get()` is a *consuming delta read*, so totals are held
+  separately. Logs go through `kyo.Log` (`apollo.obs.ObsLog`). Export is
+  content-free, native-safe, hand-rolled OTLP/HTTP JSON (no OTel SDK): fired
+  fire-and-forget in `finishTurn`, gated by `monitoring.export.otlp.*`.
 
 ---
 
@@ -338,6 +351,7 @@ sequenceDiagram
       Agent->>Agent: iterationsThisTurn += 1 → next loop
     end
   end
+  Note over Agent: close agent.turn span; export traces/metrics/logs (OTLP, if enabled)
   Agent->>Store: updateMeta(count, apiCalls, usage)
   Agent-->>Caller: TurnResult(finalResponse, exitReason, usage)
 ```
@@ -386,6 +400,10 @@ sequenceDiagram
       - **No tool calls** → collect the text, `finishTurn("text_response")`, done.
       - **Tool calls present** → run the tool round.
 5. **Tool round** (`runToolRound`, sequential over the calls):
+   - **Auto-checkpoint.** Before the first file-mutating tool of the turn, when
+     `checkpoints.enabled`, snapshot the working tree (git) so `/rollback` can
+     restore it later; fail-open when it isn't a git repo. Each tool call also
+     opens a `tool.<name>` span (duration + error) under the turn's trace.
    - If interrupted, the remaining calls get a synthetic cancelled `ToolResult`
      (so every `tool_use` keeps a matching `tool_result` — alternation stays
      valid).
@@ -402,10 +420,13 @@ sequenceDiagram
        the server's `trust` setting, and renders the result Hermes-style.
    - The results become one tool-role `Message`, appended to the transcript, and
      the loop repeats (`iterationsThisTurn + 1`).
-6. **Finish.** `finishTurn` updates the session metadata (message count, API
-   calls, cumulative usage) and returns a `TurnResult(finalResponse, exitReason,
-   usage, interrupted)`. `exitReason` is one of `text_response`,
-   `max_iterations`, `interrupted`, or `error(...)`.
+6. **Finish.** `finishTurn` closes the `agent.turn` span, updates the session
+   metadata (message count, API calls, cumulative usage), records the turn's
+   metrics, and — when `monitoring.export.otlp.*` is enabled — forks a
+   fire-and-forget OTLP export of the trace tree, the metric snapshot, and any
+   buffered logs. It returns a `TurnResult(finalResponse, exitReason, usage,
+   interrupted)`. `exitReason` is one of `text_response`, `max_iterations`,
+   `interrupted`, `empty_response`, `repetition_guard`, or `error(...)`.
 
 ### Delivery back to the entry point
 

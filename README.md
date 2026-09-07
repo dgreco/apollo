@@ -36,7 +36,8 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
   over CDP), `text_to_speech` / `transcribe`, plus every tool exported by
   connected **MCP servers**.
 - **MCP client** — stdio and streamable-HTTP transports, OAuth 2.1 + PKCE, a
-  reliability ladder (circuit breaker / keepalive / reconnect / parking), and
+  reliability ladder (circuit breaker / keepalive / reconnect / parking),
+  server→client sampling + elicitation, and
   `apollo mcp add|remove|list|test|login|reauth|logout`.
 - **Gateway** — one process hosting Telegram, Discord, Slack, Matrix, WhatsApp, SMS, Teams, iMessage, an
   OpenAI-compatible HTTP API, a generic webhook, and a cron scheduler, with
@@ -48,6 +49,9 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
   response lifecycle (`kyo.Log` + `kyo-stats`), exported as OTLP/HTTP; `/trace`
   and `/metrics` in the REPL, and a one-command Jaeger + Prometheus + Grafana
   demo stack in `observability/`.
+- **Editor & workspace** — an **ACP** server (`apollo acp`, for VS Code / Zed /
+  JetBrains), an **LSP** client tool for language servers, git
+  **checkpoints/snapshots** with rollback, and a local **kanban** board.
 - **Config-compatible with Hermes** — same files, formats, precedence, home
   layout, and skill format (agentskills.io); verified against a live Hermes
   install and the real 2,148-line `cli-config.yaml.example`.
@@ -118,8 +122,11 @@ apollo                       # start chatting
 ```
 
 Startup shows a **welcome screen** (ASCII-art title + a framed panel of available
-tools and skills grouped by category, with your model, cwd, and session), and
-each turn ends with a **status line** (model · context usage · tokens · turn time).
+tools and skills grouped by category, with your model, cwd, and session), and a
+**status bar pinned to the bottom** (model · context usage · tokens · rate · turn
+time) that updates live during a turn as output scrolls above it
+(`APOLLO_NO_STATUS_BAR=1` to disable; it falls back to an inline line on
+non-pinning terminals).
 
 Type `/` to see the commands: the native REPL shows a **live menu** that filters
 as you type; on the JVM (JLine) press **TAB** to list/complete. **TAB** completes
@@ -182,6 +189,11 @@ apollo memory         print MEMORY.md and USER.md
 apollo status         config + provider health check (alias: doctor)
 apollo cron           list scheduled jobs (run-scheduler starts the tick loop)
 apollo mcp            list | test | add | remove | login | reauth | logout
+apollo auth           <copilot|qwen> [login | status | logout]  (provider OAuth)
+apollo secrets        status | resolve  (secret sources; values masked)
+apollo monitoring     status  (observability / OTLP export state)
+apollo lsp            status  (configured language servers)
+apollo acp            run the Agent Client Protocol server (editor integration)
 apollo gateway        run the messaging gateway
 apollo setup          interactive provider setup wizard
 ```
@@ -445,12 +457,19 @@ same core tools and wire schemas, same skill format and CLI shape. A full Hermes
 `config.yaml` loads unchanged — keys for subsystems apollo doesn't implement are
 parsed and ignored.
 
-**Deliberately out of scope:** the Ink/Node TUI and desktop/web apps; the other
-~23 gateway platforms and voice/attachments/Block-Kit; provider OAuth token
-brokers (`openai-codex`/`copilot`/`vertex`); the MCP schema cache, `lazy`
-servers, session recycling, and sampling; Modal/Daytona/Singularity terminal
-backends; browser/computer-use and image/video tools; Honcho, plugins/hooks,
-trajectory tooling, and telemetry.
+**Deliberately out of scope:** the Ink/Node TUI and the desktop/web apps; the
+remaining chat platforms and rich attachments / Slack Block-Kit; the
+`openai-codex` and `vertex` provider OAuth brokers (`copilot` and `qwen` *are*
+supported); the MCP schema cache, `lazy` servers, and session recycling;
+Modal / Daytona terminal backends; and Honcho, plugins/hooks, and trajectory
+tooling.
+
+Recent additions now **in** scope: the Matrix / WhatsApp / SMS / Teams / iMessage
+gateways; voice (`text_to_speech` / `transcribe`), `image_generate`,
+`video_generate`, `browser`, and `computer_use` tools; the `singularity`
+terminal backend; MCP sampling + elicitation; git checkpoints/snapshots; an ACP
+server and an LSP client tool; and content-free logs/traces/metrics with OTLP
+export (see [Observability](#observability)).
 
 Status: **0.1.0-SNAPSHOT** — an actively developed clone, not an official Nous
 Research product.
