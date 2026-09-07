@@ -3,14 +3,16 @@
 #   apollo ──OTLP/HTTP :4318──▶ otel-collector ──┬─▶ jaeger  (traces UI :16686)
 #                                                 ├─▶ prometheus (metrics :9090, scrapes :8889)
 #                                                 └─▶ stdout   (logs — `docker compose logs -f otel-collector`)
+#                                                      grafana (dashboards :3000, reads jaeger + prometheus)
 #
 # Usage:
 #   docker compose up -d
 #   # then point apollo at it (see README.md):
 #   #   monitoring.export.otlp.{enabled,metrics,logs}: true
 #   #   monitoring.export.otlp.endpoint: http://localhost:4318
+#   Grafana:       http://localhost:3000    (anonymous; "apollo · agent" dashboard)
 #   Jaeger UI:     http://localhost:16686   (service "apollo")
-#   Prometheus UI: http://localhost:9090    (query apollo_turns_total, apollo_llm_ms_*)
+#   Prometheus UI: http://localhost:9090    (query apollo_turns, apollo_llm_ms_*)
 #
 # Images are pinned for reproducibility; bump them as you like.
 
@@ -50,3 +52,24 @@ services:
       - "9090:9090"   # Prometheus UI
     depends_on:
       - otel-collector
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: apollo-grafana
+    environment:
+      # Anonymous admin — a local demo, no login. Remove for anything shared.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_USERS_DEFAULT_THEME=dark
+    volumes:
+      # Mount only our subdirs so Grafana's built-in plugins/alerting
+      # provisioning dirs stay in place (avoids "no such file" log noise).
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"   # Grafana UI
+    depends_on:
+      - prometheus
+      - jaeger

@@ -1,0 +1,14 @@
+# Load dashboards baked into the image path below (mounted from ./grafana/dashboards).
+apiVersion: 1
+
+providers:
+  - name: apollo
+    orgId: 1
+    folder: apollo
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

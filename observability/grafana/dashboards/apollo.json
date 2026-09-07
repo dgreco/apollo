@@ -1,0 +1,105 @@
+{
+  "uid": "apollo-agent",
+  "title": "apollo · agent",
+  "tags": ["apollo", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "links": [
+    { "title": "Traces (Jaeger)", "url": "http://localhost:16686/search?service=apollo", "type": "link", "icon": "external link", "targetBlank": true, "tooltip": "agent.turn → llm.call → tool.* spans" },
+    { "title": "Prometheus", "url": "http://localhost:9090", "type": "link", "icon": "external link", "targetBlank": true }
+  ],
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Turns",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "apollo_turns", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "area", "textMode": "auto", "justifyMode": "auto" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "API calls",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "apollo_api_calls", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "area", "textMode": "auto", "justifyMode": "auto" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Tool calls",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "apollo_tool_calls", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "area", "textMode": "auto", "justifyMode": "auto" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Errors",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "apollo_errors", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto", "justifyMode": "auto" }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Throughput (per second)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(apollo_turns[5m])", "legendFormat": "turns/s", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "rate(apollo_api_calls[5m])", "legendFormat": "api calls/s", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "C", "expr": "rate(apollo_tool_calls[5m])", "legendFormat": "tool calls/s", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Tokens per second",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(apollo_tokens_input[5m])", "legendFormat": "input", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "rate(apollo_tokens_output[5m])", "legendFormat": "output", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "LLM latency (avg)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(apollo_llm_ms_sum[5m]) / rate(apollo_llm_ms_count[5m])", "legendFormat": "llm.call", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "rate(apollo_ttft_ms_sum[5m]) / rate(apollo_ttft_ms_count[5m])", "legendFormat": "ttft", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Tool latency (avg)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(apollo_tool_ms_sum[5m]) / rate(apollo_tool_ms_count[5m])", "legendFormat": "tool.*", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Turn latency (avg)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(apollo_turn_ms_sum[5m]) / rate(apollo_turn_ms_count[5m])", "legendFormat": "agent.turn", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    }
+  ]
+}

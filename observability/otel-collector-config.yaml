@@ -20,11 +20,13 @@ exporters:
     tls:
       insecure: true
 
-  # Metrics → a Prometheus scrape endpoint on :8889. apollo's dotted metric names
-  # are normalized by Prometheus conventions: apollo.turns → apollo_turns_total,
-  # apollo.turn_ms → apollo_turn_ms_{bucket,sum,count}, etc.
+  # Metrics → a Prometheus scrape endpoint on :8889. apollo's dotted names are
+  # normalized to underscores; add_metric_suffixes:false keeps them clean and
+  # predictable (apollo_turns, apollo_turn_ms_{bucket,sum,count}) so the Grafana
+  # dashboard queries can match exactly.
   prometheus:
     endpoint: 0.0.0.0:8889
+    add_metric_suffixes: false
     resource_to_telemetry_conversion:
       enabled: true
 

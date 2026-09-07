@@ -1,0 +1,23 @@
+# Auto-provisioned data sources for the apollo observability stack.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      # Let Grafana jump from a Prometheus exemplar / span to the trace, and
+      # from a trace's duration back to related metrics.
+      tracesToMetrics:
+        datasourceUid: prometheus
