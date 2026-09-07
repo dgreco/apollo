@@ -147,6 +147,28 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
       .flatMap((k, v) => v.str.map(s => k -> expandVars(s)).toList).toMap
   def otlpServiceName: String =
     strAt("monitoring", "export", "otlp", "service_name").getOrElse("apollo")
+  /** OTLP metrics export (`monitoring.export.otlp.metrics`, defaults to the
+    * traces flag) — counters/histograms POSTed to `<endpoint>/v1/metrics`. */
+  def otlpMetricsEnabled: Boolean =
+    at("monitoring", "export", "otlp", "metrics").flatMap(_.bool).getOrElse(otlpEnabled)
+  /** OTLP logs export (`monitoring.export.otlp.logs`, default off) — apollo's own
+    * structured trace/debug events POSTed to `<endpoint>/v1/logs`. */
+  def otlpLogsEnabled: Boolean =
+    at("monitoring", "export", "otlp", "logs").flatMap(_.bool).getOrElse(false)
+  /** True when any OTLP pillar is on AND an endpoint is configured. */
+  def otlpAnyEnabled: Boolean =
+    (otlpEnabled || otlpMetricsEnabled || otlpLogsEnabled) && otlpEndpoint.nonEmpty
+  /** apollo's own structured-log level (`monitoring.log.level` / `APOLLO_LOG_LEVEL`):
+    * trace|debug|info|warn|error|silent. Default silent (no console noise). */
+  def obsLogLevel: String =
+    strAt("monitoring", "log", "level").orElse(env.get("APOLLO_LOG_LEVEL"))
+      .getOrElse("silent").trim.toLowerCase
+  /** Print each turn's span tree to the terminal (`monitoring.trace.console` /
+    * `APOLLO_TRACE=1`) — the human-readable "what happened" trace. Default off. */
+  def obsTraceConsole: Boolean =
+    at("monitoring", "trace", "console").flatMap(_.bool)
+      .orElse(env.get("APOLLO_TRACE").map(v => v == "1" || v.equalsIgnoreCase("true")))
+      .getOrElse(false)
   /** `computer_use.enabled`: allow the computer_use tool to control the desktop
     * (screen/mouse/keyboard via macOS `screencapture`/`cliclick`). Opt-in. */
   def computerUseEnabled: Boolean = at("computer_use", "enabled").flatMap(_.bool).getOrElse(false)

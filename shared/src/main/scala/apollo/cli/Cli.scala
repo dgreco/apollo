@@ -53,11 +53,19 @@ object Cli:
               case Present(err) =>
                 Console.printLineErr(
                   Style.red(s"warning: ${paths.configYaml} unparseable ($err); using defaults")
-                ).andThen(apollo.config.Secrets.applyTo(config).map(c => dispatch(args, c, paths)))
+                ).andThen(apollo.config.Secrets.applyTo(config).map(c => withObs(c)(dispatch(args, c, paths))))
               case Absent =>
-                apollo.config.Secrets.applyTo(config).map(c => dispatch(args, c, paths))
+                apollo.config.Secrets.applyTo(config).map(c => withObs(c)(dispatch(args, c, paths)))
           }
       }
+
+  /** Install apollo's observability logging for the run: enable OTLP-logs
+    * capture when configured, and (unless the level is silent) route apollo's
+    * structured `Log` events to an apollo console logger at that level. Silent
+    * (the default) leaves the ambient quiet logger and clean chat UI untouched. */
+  private def withObs[A, S](c: ApolloConfig)(body: A < S)(using Frame): A < S =
+    apollo.obs.ObsLog.setCapture(c.otlpLogsEnabled && c.otlpEndpoint.nonEmpty)
+    apollo.obs.ObsLog.withLogger(apollo.obs.ObsLog.parseLevel(c.obsLogLevel))(body)
 
   private def dispatch(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async & Scope) =
     args.command.getOrElse("chat") match

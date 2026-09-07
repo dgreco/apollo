@@ -217,8 +217,18 @@ final class Repl(
                   emitLine(Style.red(s"· ${result.exitReason}"))
                 else Sync.defer(())
       _      <- if barPinned then editor.bottomBar(statusBar(width)) else Sync.defer(()) // settle the bar
+      _      <- maybeTraceConsole
       _      <- maybeAutoReview(tools, result)
     yield result
+
+  /** Print the just-completed turn's span tree to the terminal when
+    * `monitoring.trace.console` / `APOLLO_TRACE=1` — the human-readable trace of
+    * prompt → response. */
+  private def maybeTraceConsole: Unit < (Sync & Async) =
+    if !toolCtx.config.obsTraceConsole then Sync.defer(())
+    else agent.lastTrace match
+      case Present(tc) => emitLine(Style.dim(tc.render))
+      case Absent      => Sync.defer(())
 
   /** After a completed turn, fork a background reviewer that actually saves
     * durable memories/skills, on the `agent.auto_review` cadence. Fire-and-
@@ -332,6 +342,12 @@ final class Repl(
                 .andThen(flushRemainder(buf))
                 .andThen(if note.isEmpty then Sync.defer(()) else editor.printAbove(Style.dim(note)))
                 .andThen(if barPinned then editor.bottomBar(statusBar(width)) else Sync.defer(()))
+                .andThen(
+                  if toolCtx.config.obsTraceConsole then
+                    agent.lastTrace match
+                      case Present(tc) => editor.printAbove(Style.dim(tc.render))
+                      case Absent      => Sync.defer(())
+                  else Sync.defer(()))
                 .andThen(onAsyncTurnComplete)
             }
         Fiber.initUnscoped(work).unit
@@ -458,6 +474,12 @@ final class Repl(
       case "usage" =>
         val u = agent.usageSnapshot
         Console.printLine(s"usage: ${ReplCommands.formatUsage(u)} · total ${u.total} · ${agent.apiCallCount} api calls").andThen(true)
+      case "trace" =>
+        agent.lastTrace match
+          case Present(tc) => Console.printLine(tc.render).andThen(true)
+          case Absent      => Console.printLine("no turn traced yet — send a prompt first").andThen(true)
+      case "metrics" =>
+        Console.printLine(apollo.obs.Metrics.render).andThen(true)
       case "diff" => doDiff(arg)
       case "reload-skills" | "reload_skills" =>
         toolCtx.skills.scan.map(sk => Console.printLine(s"rescanned skills: ${sk.length} installed")).andThen(true)

@@ -329,13 +329,19 @@ object Commands:
     }
     Console.printLine(s"lsp: ${if config.lspEnabled then "enabled" else "disabled"}\nservers:\n" + rows.mkString("\n"))
 
-  /** `apollo monitoring status` — the OTLP export configuration. */
+  /** `apollo monitoring status` — the observability configuration (logs, traces,
+    * metrics) and OTLP export state. */
   def monitoring(args: CliArgs, config: ApolloConfig, paths: ApolloPaths): Unit < (Sync & Async) =
+    def onoff(b: Boolean): String = if b then "enabled" else "disabled"
     Console.printLine(List(
-      s"otlp export:   ${if config.otlpEnabled then "enabled" else "disabled"}",
       s"endpoint:      ${if config.otlpEndpoint.isEmpty then "(unset)" else config.otlpEndpoint}",
       s"service.name:  ${config.otlpServiceName}",
-      s"active:        ${apollo.obs.Monitor.enabled(config)} (content-free turn/tool traces)"
+      "pillars (OTLP/HTTP JSON, content-free):",
+      s"  traces:      ${onoff(apollo.obs.Monitor.tracesEnabled(config))}  → /v1/traces  (agent.turn · llm.call · tool.*)",
+      s"  metrics:     ${onoff(apollo.obs.Monitor.metricsEnabled(config))}  → /v1/metrics (counters + latency histograms)",
+      s"  logs:        ${onoff(apollo.obs.Monitor.logsEnabled(config))}  → /v1/logs    (structured turn events)",
+      s"log level:     ${config.obsLogLevel}  (monitoring.log.level / APOLLO_LOG_LEVEL)",
+      s"trace console: ${onoff(config.obsTraceConsole)}  (monitoring.trace.console / APOLLO_TRACE)"
     ).mkString("\n"))
 
   /** `apollo secrets [status|resolve]` — configured secret sources + a dry-run

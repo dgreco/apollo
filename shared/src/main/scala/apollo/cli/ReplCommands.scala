@@ -256,6 +256,8 @@ object ReplCommands:
     CommandInfo("verbose", Nil, "", "toggle tool-progress display", "commands"),
     CommandInfo("status", List("history"), "", "model, message count, token usage, context %", "session"),
     CommandInfo("usage", Nil, "", "cumulative token usage", "session"),
+    CommandInfo("trace", Nil, "", "span tree of the last turn (prompt → response)", "session"),
+    CommandInfo("metrics", Nil, "", "counters + latency histograms for this run", "session"),
     CommandInfo("config", Nil, "", "effective configuration summary", "session"),
     CommandInfo("profile", Nil, "", "active profile and home dir", "session"),
     CommandInfo("reset", List("new"), "", "clear the conversation", "session"),

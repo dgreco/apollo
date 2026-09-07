@@ -49,6 +49,7 @@ lazy val agent = crossProject(JVMPlatform, NativePlatform)
       "io.getkyo"     %%  "kyo-data"        % kyoVersion,
       "io.getkyo"     %%  "kyo-http"        % kyoVersion,
       "io.getkyo"     %%  "kyo-schema-json" % kyoVersion,
+      "io.getkyo"     %%  "kyo-stats-registry" % kyoVersion,
       "org.virtuslab" %%  "scala-yaml"      % scalaYamlVersion,
       "org.scalameta" %%  "munit"           % munitVersion % Test
     ),

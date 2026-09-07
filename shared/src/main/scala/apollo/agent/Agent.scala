@@ -4,6 +4,7 @@ import apollo.core.*
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore}
 import apollo.tools.{ToolContext, ToolRegistry}
+import apollo.obs.{Metrics, Monitor, ObsLog, Otlp, TraceContext}
 import kyo.*
 
 /** UI-facing callbacks for one turn. All are fire-and-forget; a callback
@@ -55,7 +56,22 @@ final class Agent(
   private var emptyRetriesUsed = 0
   private var checkpointedThisTurn = false
   private var turnStartMs = 0L
-  private val toolTimings = scala.collection.mutable.ListBuffer[apollo.obs.Monitor.ToolTiming]()
+
+  // --- observability: per-turn trace tree + live-call timing ---------------
+  private var turnTrace: TraceContext          = null.asInstanceOf[TraceContext]
+  private var rootOpen: TraceContext.Open      = null.asInstanceOf[TraceContext.Open]
+  private var lastTraceCtx: Maybe[TraceContext] = Absent
+  @volatile private var llmCallStartMs = 0L
+  @volatile private var llmFirstTokenMs = 0L
+  /** The most recent completed turn's trace tree — for `/trace` and the console
+    * trace view. */
+  def lastTrace: Maybe[TraceContext] = lastTraceCtx
+
+  private def traceBegin(name: String): TraceContext.Open =
+    if turnTrace != null then turnTrace.begin(name) else null.asInstanceOf[TraceContext.Open]
+  private def traceEnd(open: TraceContext.Open, error: Boolean, attrs: List[Otlp.Attr]): Unit =
+    if turnTrace != null && open != null then { turnTrace.end(open, error, attrs); () }
+  private def traceMaybe: Maybe[TraceContext] = if turnTrace != null then Present(turnTrace) else Absent
 
   private var sid           = sessionId
   private var forceCompress = false
@@ -102,7 +118,9 @@ final class Agent(
     emptyRetriesUsed = 0
     checkpointedThisTurn = false
     turnStartMs = java.lang.System.currentTimeMillis()
-    toolTimings.clear()
+    // Fresh per-turn trace: root `agent.turn` span, children added as we go.
+    turnTrace = new TraceContext(config.otlpServiceName)
+    rootOpen  = turnTrace.begin("agent.turn")
     val settings = nudgeSettings(toolNames)
     // Lazily hydrate the nudge cadence from restored history on the first turn
     // (Hermes parity), now that the toolset is known.
@@ -117,9 +135,11 @@ final class Agent(
     val effectiveSystemPrompt = reminder match
       case Present(text) => s"$systemPrompt\n\n$text"
       case Absent        => systemPrompt
-    store.appendMessage(sid, userMessage).andThen {
-      loop(effectiveSystemPrompt, toolNames, callbacks, iterationsThisTurn = 0, graceUsed = false)
-    }
+    ObsLog.info(
+      s"turn start · model=${runtime.model} provider=${runtime.providerSlug} tools=${toolNames.length} session=$sid",
+      traceMaybe)
+      .andThen(store.appendMessage(sid, userMessage))
+      .andThen(loop(effectiveSystemPrompt, toolNames, callbacks, iterationsThisTurn = 0, graceUsed = false))
 
   private def loop(
       systemPrompt: String,
@@ -151,7 +171,17 @@ final class Agent(
             tools = if grace then Nil else ToolRegistry.definitions(toolNames, toolCtx),
             promptCache = config.promptCacheEnabled
           )
-          callWithFallback(request, callbacks).map {
+          // One `llm.call` span per provider round (prompt → response); TTFT is
+          // captured from the first streamed token (see callWithRetries).
+          val llmOpen = traceBegin("llm.call")
+          llmCallStartMs  = java.lang.System.currentTimeMillis()
+          llmFirstTokenMs = 0L
+          ObsLog.debug(
+            s"→ llm.call · messages=${messages.length} tools=${if grace then 0 else toolNames.length} iter=$iterationsThisTurn",
+            traceMaybe
+          ).andThen(callWithFallback(request, callbacks)).map { result =>
+            closeLlmSpan(llmOpen, result).andThen {
+              result match {
             case Result.Failure(AgentError.Interrupted) =>
               finishTurn("", "interrupted", interrupted = true)
             case Result.Failure(AgentError.Provider(err)) =>
@@ -206,7 +236,9 @@ final class Agent(
                     }
                   }
               }
-          }
+              } // result match
+            }   // closeLlmSpan.andThen
+          }     // callWithFallback.map
         }
   end loop
 
@@ -241,12 +273,18 @@ final class Agent(
         // Keep tool_call/result pairing intact on interrupt.
         Content.ToolResult(tu.id, s"[Tool execution cancelled — ${tu.name} was skipped due to user interrupt]", true)
       else
-        Sync.defer(java.lang.System.currentTimeMillis()).map { t0 =>
-          callbacks.onToolStart(tu.name, tu.arguments.take(200)).andThen {
-            ToolRegistry.dispatch(tu.name, tu.arguments, toolCtx).map { (output, isError) =>
-              Sync.defer { toolTimings += apollo.obs.Monitor.ToolTiming(tu.name, t0, java.lang.System.currentTimeMillis(), isError); () }
-                .andThen(callbacks.onToolComplete(tu.name, output.take(300), isError))
-                .andThen(Content.ToolResult(tu.id, output, isError))
+        Sync.defer((java.lang.System.currentTimeMillis(), traceBegin(s"tool.${tu.name}"))).map { (t0, open) =>
+          ObsLog.trace(s"→ tool.${tu.name}", traceMaybe).andThen {
+            callbacks.onToolStart(tu.name, tu.arguments.take(200)).andThen {
+              ToolRegistry.dispatch(tu.name, tu.arguments, toolCtx).map { (output, isError) =>
+                val ms = java.lang.System.currentTimeMillis() - t0
+                Sync.defer(traceEnd(open, isError,
+                    List(Otlp.Attr.S("tool.name", tu.name), Otlp.Attr.I("duration_ms", ms), Otlp.Attr.B("error", isError))))
+                  .andThen(Metrics.toolCall(ms, isError))
+                  .andThen(ObsLog.trace(s"← tool.${tu.name} · ${ms}ms${if isError then " error" else ""}", traceMaybe))
+                  .andThen(callbacks.onToolComplete(tu.name, output.take(300), isError))
+                  .andThen(Content.ToolResult(tu.id, output, isError))
+              }
             }
           }
         }
@@ -268,9 +306,12 @@ final class Agent(
           case rt :: rest =>
             callWithRetries(request, callbacks, attempt = 0, rt).map {
               case Result.Failure(AgentError.Provider(err)) if rest.nonEmpty && !interruptFlag.get =>
-                callbacks.onStatus(
-                  s"provider ${rt.providerSlug} failed (${err.getMessage.take(80)}); " +
-                    s"falling over to ${rest.head.providerSlug}")
+                ObsLog.warn(
+                  s"provider ${rt.providerSlug} failed; falling over to ${rest.head.providerSlug} · ${err.getMessage.take(80)}",
+                  traceMaybe)
+                  .andThen(callbacks.onStatus(
+                    s"provider ${rt.providerSlug} failed (${err.getMessage.take(80)}); " +
+                      s"falling over to ${rest.head.providerSlug}"))
                   .andThen(attemptChain(rest))
               case other => other // success, interrupt, or last provider's failure
             }
@@ -309,9 +350,11 @@ final class Agent(
       attempt: Int,
       rt: ResolvedRuntime
   ): Result[AgentError, TurnResponse] < (Sync & Async) =
+    def markFirstToken(): Unit =
+      if llmFirstTokenMs == 0L then llmFirstTokenMs = java.lang.System.currentTimeMillis()
     val events: StreamEvent => Unit < (Sync & Async) =
-      case StreamEvent.TextDelta(t)        => callbacks.onTextDelta(t)
-      case StreamEvent.ThinkingDelta(t)    => callbacks.onThinkingDelta(t)
+      case StreamEvent.TextDelta(t)        => Sync.defer(markFirstToken()).andThen(callbacks.onTextDelta(t))
+      case StreamEvent.ThinkingDelta(t)    => Sync.defer(markFirstToken()).andThen(callbacks.onThinkingDelta(t))
       case StreamEvent.ToolUseStarted(_, n) => callbacks.onStatus(s"tool: $n")
       case _                                => ()
 
@@ -324,7 +367,8 @@ final class Agent(
       case Result.Success(resp) => Result.succeed(resp)
       case Result.Failure(AgentError.Provider(err)) if err.retryable && attempt + 1 < config.apiMaxRetries =>
         val delay = backoffSeconds(attempt)
-        callbacks.onStatus(s"provider error (${err.getMessage.take(120)}); retry ${attempt + 2}/${config.apiMaxRetries} in ${delay}s")
+        ObsLog.warn(s"llm retry ${attempt + 2}/${config.apiMaxRetries} in ${delay}s · ${err.getMessage.take(80)}", traceMaybe)
+          .andThen(callbacks.onStatus(s"provider error (${err.getMessage.take(120)}); retry ${attempt + 2}/${config.apiMaxRetries} in ${delay}s"))
           .andThen(Async.sleep(delay.seconds))
           .andThen(callWithRetries(request, callbacks, attempt + 1, rt))
       case other => other
@@ -389,29 +433,75 @@ final class Agent(
     if messages.length < 8 || (!due && !forced) then ()
     else
       val reason = if forced && !due then "compressing history (requested)" else "context pressure: compressing history"
-      callbacks.onStatus(reason).andThen {
-        val pruned = Compression.pruneOldToolResults(messages, config.protectLastN)
-        Compression.summarizeMiddle(pruned, config, runtime, sid, store).map { compressed =>
-          messages = compressed
-          lastPromptTokens = 0 // re-measured on the next response
+      val open   = traceBegin("compress")
+      ObsLog.debug(s"→ compress · $reason (${messages.length} messages)", traceMaybe).andThen {
+        callbacks.onStatus(reason).andThen {
+          val pruned = Compression.pruneOldToolResults(messages, config.protectLastN)
+          Compression.summarizeMiddle(pruned, config, runtime, sid, store).map { compressed =>
+            messages = compressed
+            lastPromptTokens = 0 // re-measured on the next response
+          }.andThen(Sync.defer(traceEnd(open, false, List(Otlp.Attr.I("messages_after", messages.length.toLong)))))
+            .andThen(ObsLog.debug(s"← compress · now ${messages.length} messages", traceMaybe))
         }
       }
 
-  private def finishTurn(text: String, reason: String, interrupted: Boolean): TurnResult < (Sync & Async) =
-    store.updateMeta(sid)(m =>
-      m.copy(messageCount = messages.length, apiCalls = apiCalls, usage = totalUsage)
-    ).andThen(maybeExportTrace(reason)).andThen(TurnResult(text, reason, apiCalls, totalUsage, interrupted))
+  /** Close the current `llm.call` span, record its latency (and TTFT), and log
+    * the round's outcome. */
+  private def closeLlmSpan(
+      open: TraceContext.Open,
+      result: Result[AgentError, TurnResponse]
+  ): Unit < (Sync & Async) =
+    val ms   = java.lang.System.currentTimeMillis() - llmCallStartMs
+    val ttft = if llmFirstTokenMs > 0L then llmFirstTokenMs - llmCallStartMs else -1L
+    val base = List(
+      Otlp.Attr.S("provider", runtime.providerSlug),
+      Otlp.Attr.S("model", runtime.model),
+      Otlp.Attr.I("duration_ms", ms))
+    val ttftAttr = if ttft >= 0 then List(Otlp.Attr.I("ttft_ms", ttft)) else Nil
+    val (error, extra, note) = result match
+      case Result.Success(resp) =>
+        (false,
+          List(Otlp.Attr.I("tokens.input", resp.usage.inputTokens),
+               Otlp.Attr.I("tokens.output", resp.usage.outputTokens)),
+          s"in=${resp.usage.inputTokens} out=${resp.usage.outputTokens}")
+      case Result.Failure(AgentError.Interrupted) => (false, List(Otlp.Attr.S("result", "interrupted")), "interrupted")
+      case _                                      => (true, List(Otlp.Attr.S("result", "error")), "error")
+    Sync.defer(traceEnd(open, error, base ++ ttftAttr ++ extra))
+      .andThen(Metrics.llmCall(ms))
+      .andThen(if ttft >= 0 then Metrics.ttft(ttft) else Sync.defer(()))
+      .andThen(ObsLog.debug(
+        s"← llm.call · ${ms}ms${if ttft >= 0 then s" ttft=${ttft}ms" else ""} · $note", traceMaybe))
 
-  /** Fire-and-forget content-free OTLP trace for this turn (gated by
-    * `monitoring.export.otlp.enabled`). */
-  private def maybeExportTrace(reason: String): Unit < (Sync & Async) =
-    if !apollo.obs.Monitor.enabled(config) then Sync.defer(())
+  private def finishTurn(text: String, reason: String, interrupted: Boolean): TurnResult < (Sync & Async) =
+    val turnMs = java.lang.System.currentTimeMillis() - turnStartMs
+    val rootAttrs = List(
+      Otlp.Attr.S("exit_reason", reason),
+      Otlp.Attr.I("api_calls", apiCalls.toLong),
+      Otlp.Attr.I("tokens.input", totalUsage.inputTokens),
+      Otlp.Attr.I("tokens.output", totalUsage.outputTokens),
+      Otlp.Attr.I("duration_ms", turnMs),
+      Otlp.Attr.B("interrupted", interrupted))
+    Sync.defer {
+      traceEnd(rootOpen, reason.startsWith("error"), rootAttrs)
+      lastTraceCtx = traceMaybe // expose the completed tree to /trace + console
+      ()
+    }.andThen(ObsLog.info(
+        s"turn end · reason=$reason apiCalls=$apiCalls in=${totalUsage.inputTokens} out=${totalUsage.outputTokens} ${turnMs}ms",
+        traceMaybe))
+      .andThen(store.updateMeta(sid)(m =>
+        m.copy(messageCount = messages.length, apiCalls = apiCalls, usage = totalUsage)))
+      .andThen(Metrics.turnCompleted(reason, apiCalls.toLong, totalUsage.inputTokens, totalUsage.outputTokens, turnMs))
+      .andThen(maybeExportObs())
+      .andThen(TurnResult(text, reason, apiCalls, totalUsage, interrupted))
+
+  /** Fire-and-forget OTLP export of this turn's traces, the cumulative metric
+    * snapshot, and any buffered logs — gated by `monitoring.export.otlp.*`,
+    * fail-open, content-free. */
+  private def maybeExportObs(): Unit < (Sync & Async) =
+    if !config.otlpAnyEnabled || turnTrace == null then Sync.defer(())
     else
-      Sync.defer(java.lang.System.currentTimeMillis()).map { end =>
-        Fiber.initUnscoped(apollo.obs.Monitor.exportTurn(
-          config, reason, apiCalls.toLong, totalUsage.inputTokens, totalUsage.outputTokens,
-          turnStartMs, end, toolTimings.toList)).unit
-      }
+      val tc = turnTrace
+      Fiber.initUnscoped(Monitor.exportAll(config, tc)).unit
 end Agent
 
 /** Strict role-alternation repair (upstream `repair_message_sequence`):
