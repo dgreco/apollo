@@ -1,7 +1,7 @@
 # GitLab CI for apollo — assumes a Docker executor.
 #
 # Pipeline: compile (JVM) → test (JVM) → integration (Docker-in-Docker +
-# docker compose) → native (manual; needs the LLVM/OpenSSL toolchain).
+# docker compose) → native (auto; needs the LLVM + OpenSSL + liburing toolchain).
 #
 # Notes
 #  * The image is on the sbtscala sbt-2.x line; its launcher runs the sbt 2.0.8
@@ -13,8 +13,9 @@
 #    time, so JDK 21 dies with UnsupportedClassVersionError. Hence temurin-25.
 #  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test job
 #    uses `testOnly *` to force a full run.
-#  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); run it on a
-#    runner with enough RAM — hence it's `when: manual`.
+#  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); it runs on
+#    every pipeline (so Native stays validated) but is kept `allow_failure`
+#    until the native runner is proven reliable — drop that to make it a gate.
 
 stages:
   - build
@@ -97,13 +98,21 @@ integration:compose:
 native:link:
   extends: .sbt
   stage: native
-  when: manual
+  # Runs automatically so the Native platform is validated on every pipeline,
+  # not just when someone remembers to click a manual job. Kept allow_failure
+  # for now while the native runner's reliability is proven; drop it to make
+  # Native a hard parity gate.
   allow_failure: true
   before_script:
-    # Scala Native + kyo-http's OpenSSL TLS shim need a C/LLVM toolchain and
-    # OpenSSL 3 dev headers.
+    # Scala Native links a C/LLVM toolchain plus three native libraries:
+    #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
+    #  * liburing-dev   — kyo-net statically links -luring (-Wl,-Bstatic -luring)
+    #    for its Linux io_uring backend, and its C shim #includes <liburing.h>.
+    #    Without the dev package the shim compiles to an empty translation unit
+    #    and every kyo_uring_*/io_uring_* symbol is undefined at link time.
+    #  * libstdc++-11-dev — boringssl's whole-archive pulls in -lstdc++.
     - apt-get update -qq
-    - apt-get install -y -qq clang llvm libstdc++-11-dev zlib1g-dev libssl-dev
+    - apt-get install -y -qq clang llvm libstdc++-11-dev zlib1g-dev libssl-dev liburing-dev
   script:
     - sbt agentNative/nativeLink
   artifacts:
