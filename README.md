@@ -44,6 +44,10 @@ Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 - **Agent core** — role-alternation repair, persist-before-execute durability,
   retries with fallback, two-phase context compression, self-improvement
   nudges, and interruptible turns.
+- **Observability** — content-free logs, traces, and metrics for the prompt →
+  response lifecycle (`kyo.Log` + `kyo-stats`), exported as OTLP/HTTP; `/trace`
+  and `/metrics` in the REPL, and a one-command Jaeger + Prometheus + Grafana
+  demo stack in `observability/`.
 - **Config-compatible with Hermes** — same files, formats, precedence, home
   layout, and skill format (agentskills.io); verified against a live Hermes
   install and the real 2,148-line `cli-config.yaml.example`.
@@ -348,6 +352,54 @@ Each platform **denies by default**: authorize users with
 tokens arrive. Cron jobs deliver to stdout or `telegram:` / `discord:` /
 `slack:<id>` targets.
 
+### Observability
+
+Logs, traces, and metrics for the prompt → response lifecycle — built on
+`kyo.Log` + `kyo-stats-registry`, exported in OTLP/HTTP JSON. Everything is
+**content-free**: operation names, enums, token counts, and durations only,
+never prompts, tool arguments, or results.
+
+**No setup** — inspect the last turn right in the REPL:
+
+```
+/trace     # span tree: agent.turn → llm.call → tool.* (provider, model, tokens, TTFT, durations)
+/metrics   # counters (turns, api_calls, tool_calls, errors, tokens) + latency histograms
+```
+
+**Live in your terminal** — env vars, no backend needed:
+
+```bash
+APOLLO_TRACE=1 apollo         # print the span tree after every response
+APOLLO_LOG_LEVEL=debug apollo # stream turn events: →/← llm.call, →/← tool.*, retries, compress …
+```
+
+**The demo stack** — traces in Jaeger, metrics in Prometheus, dashboards in
+Grafana, one command:
+
+```bash
+cd observability
+docker compose up -d          # otel-collector + jaeger + prometheus + grafana
+```
+
+Enable export in `~/.apollo/config.yaml`, then use apollo and watch it flow:
+
+```yaml
+monitoring:
+  export:
+    otlp:
+      enabled: true                     # traces  → /v1/traces
+      metrics: true                     # metrics → /v1/metrics
+      logs: true                        # logs    → /v1/logs
+      endpoint: http://localhost:4318
+```
+
+Open **Grafana at <http://localhost:3000>** (no login) for the pre-built
+_apollo · agent_ dashboard; Jaeger (<http://localhost:16686>) has the traces and
+Prometheus (<http://localhost:9090>) the raw metrics. `apollo monitoring status`
+shows what's active. Full walkthrough — including a no-Docker path — in
+[`observability/README.md`](observability/README.md). Stop with
+`docker compose down`.
+
 ---
 
 ## Testing
@@ -375,9 +427,10 @@ shared/src/main/scala/apollo/     # cross-platform sources
   tools/            mcp/          # built-in tools + approvals; MCP client subsystem
   gateway/          session/      # Telegram/Discord/Slack/API/webhook + hub; transcript store
   config/           skills/       # home/config/env resolution; skill discovery
-  core/  cron/  util/             # domain model; scheduler; SSE/UTF-8/JSON/crypto helpers
+  core/  obs/  cron/  util/        # domain model; observability (logs/traces/metrics → OTLP); scheduler; helpers
 jvm/src/main/    native/src/main/ # platform-specific: line editor, session-search backend
 shared/src/test/ jvm/src/test/    # munit suites
+observability/                    # docker-compose OTel demo stack (collector, Jaeger, Prometheus, Grafana)
 ```
 
 See [`ARCH.md`](./ARCH.md) for how these fit together and how a turn flows
