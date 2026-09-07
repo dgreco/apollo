@@ -38,6 +38,21 @@ def opensslPaths: Option[(String, String)] =
       (s"$p/include", lib)
   }
 
+/** Native link flags for kyo-net's io_uring backend (Linux only). kyo-net
+  * statically links liburing — its shipped
+  * `META-INF/kyo-ffi/native-link-flags/kyo-net.flags` carries
+  * `-Wl,-Bstatic -luring` — but apollo has no kyo-ffi sbt plugin to apply that
+  * file, so the flag is added here whenever a liburing dev package (its header)
+  * is present. macOS ships none: there the io_uring translation unit compiles to
+  * nothing and the symbols are never referenced, so this stays empty and the
+  * local build is untouched. Requires `liburing-dev` on the Linux build host
+  * (see .gitlab-ci.yml).
+  */
+def liburingLinkOptions: List[String] =
+  val hasHeader = List("/usr/include", "/usr/local/include")
+    .exists(p => file(s"$p/liburing.h").exists)
+  if (hasHeader) List("-Wl,-Bstatic", "-luring", "-Wl,-Bdynamic") else Nil
+
 lazy val agent = crossProject(JVMPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .in(file("."))
@@ -88,10 +103,15 @@ lazy val agent = crossProject(JVMPlatform, NativePlatform)
             .withLinkingOptions(cfg.linkingOptions ++ List(s"-L$lib", "-lssl", "-lcrypto"))
         case None => cfg
       }
+      // kyo-net's io_uring backend needs -luring on Linux (no-op on macOS).
+      val withUring = liburingLinkOptions match {
+        case Nil   => withSsl
+        case flags => withSsl.withLinkingOptions(withSsl.linkingOptions ++ flags)
+      }
       // Embed classpath resources into the binary so `getResourceAsStream`
       // works on Native (the test suite loads the Hermes config fixture that
       // way; default-off embedding otherwise returns null there).
-      withSsl.withLTO(LTO.none).withMode(Mode.debug).withEmbedResources(true)
+      withUring.withLTO(LTO.none).withMode(Mode.debug).withEmbedResources(true)
     }
   )
 
