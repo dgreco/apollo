@@ -382,7 +382,8 @@ never prompts, tool arguments, or results.
 
 ```bash
 APOLLO_TRACE=1 apollo         # print the span tree after every response
-APOLLO_LOG_LEVEL=debug apollo # stream turn events: →/← llm.call, →/← tool.*, retries, compress …
+APOLLO_LOG_LEVEL=debug apollo # operations: →/← llm.call, →/← tool.*, retries, compress …
+APOLLO_LOG_LEVEL=trace apollo # the above + per-iteration cadence, first-token/TTFT, tool-round detail
 ```
 
 **The demo stack** — traces in Jaeger, metrics in Prometheus, dashboards in

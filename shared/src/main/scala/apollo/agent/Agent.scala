@@ -162,7 +162,8 @@ final class Agent(
                 "what remains, and any important findings. Do not call more tools."
             )
           else ()
-        maybeCompress(callbacks).andThen {
+        ObsLog.trace(s"iteration $iterationsThisTurn · messages=${messages.length}", traceMaybe)
+          .andThen(maybeCompress(callbacks)).andThen {
           messages = Alternation.repair(messages)
           val request = TurnRequest(
             runtime = runtime,
@@ -246,7 +247,9 @@ final class Agent(
       toolUses: List[Content.ToolUse],
       callbacks: TurnCallbacks
   ): List[Content.ToolResult] < (Sync & Async) =
-    maybeCheckpoint(toolUses, callbacks).andThen(executeToolRound(toolUses, callbacks))
+    ObsLog.trace(s"tool round · ${toolUses.length} ${if toolUses.length == 1 then "call" else "calls"}", traceMaybe)
+      .andThen(maybeCheckpoint(toolUses, callbacks))
+      .andThen(executeToolRound(toolUses, callbacks))
 
   /** Auto-checkpoint the working tree before the first file-mutating tool call
     * of a turn (Hermes-style, gated by `checkpoints.enabled`). Fail-open. */
@@ -274,14 +277,14 @@ final class Agent(
         Content.ToolResult(tu.id, s"[Tool execution cancelled — ${tu.name} was skipped due to user interrupt]", true)
       else
         Sync.defer((java.lang.System.currentTimeMillis(), traceBegin(s"tool.${tu.name}"))).map { (t0, open) =>
-          ObsLog.trace(s"→ tool.${tu.name}", traceMaybe).andThen {
+          ObsLog.debug(s"→ tool.${tu.name}", traceMaybe).andThen {
             callbacks.onToolStart(tu.name, tu.arguments.take(200)).andThen {
               ToolRegistry.dispatch(tu.name, tu.arguments, toolCtx).map { (output, isError) =>
                 val ms = java.lang.System.currentTimeMillis() - t0
                 Sync.defer(traceEnd(open, isError,
                     List(Otlp.Attr.S("tool.name", tu.name), Otlp.Attr.I("duration_ms", ms), Otlp.Attr.B("error", isError))))
                   .andThen(Metrics.toolCall(ms, isError))
-                  .andThen(ObsLog.trace(s"← tool.${tu.name} · ${ms}ms${if isError then " error" else ""}", traceMaybe))
+                  .andThen(ObsLog.debug(s"← tool.${tu.name} · ${ms}ms${if isError then " error" else ""}", traceMaybe))
                   .andThen(callbacks.onToolComplete(tu.name, output.take(300), isError))
                   .andThen(Content.ToolResult(tu.id, output, isError))
               }
@@ -350,12 +353,21 @@ final class Agent(
       attempt: Int,
       rt: ResolvedRuntime
   ): Result[AgentError, TurnResponse] < (Sync & Async) =
-    def markFirstToken(): Unit =
-      if llmFirstTokenMs == 0L then llmFirstTokenMs = java.lang.System.currentTimeMillis()
+    // The first streamed token flips the TTFT clock and, at trace level, emits
+    // the finest latency signal we have — the instant the model starts
+    // responding, well before the `← llm.call` round summary (debug).
+    def onFirstToken(kind: String): Unit < Sync =
+      Sync.defer {
+        if llmFirstTokenMs == 0L then
+          llmFirstTokenMs = java.lang.System.currentTimeMillis(); true
+        else false
+      }.map(first =>
+        if first then ObsLog.trace(s"llm.call first $kind token · ttft=${llmFirstTokenMs - llmCallStartMs}ms", traceMaybe)
+        else Sync.defer(()))
     val events: StreamEvent => Unit < (Sync & Async) =
-      case StreamEvent.TextDelta(t)        => Sync.defer(markFirstToken()).andThen(callbacks.onTextDelta(t))
-      case StreamEvent.ThinkingDelta(t)    => Sync.defer(markFirstToken()).andThen(callbacks.onThinkingDelta(t))
-      case StreamEvent.ToolUseStarted(_, n) => callbacks.onStatus(s"tool: $n")
+      case StreamEvent.TextDelta(t)         => onFirstToken("text").andThen(callbacks.onTextDelta(t))
+      case StreamEvent.ThinkingDelta(t)     => onFirstToken("thinking").andThen(callbacks.onThinkingDelta(t))
+      case StreamEvent.ToolUseStarted(_, n) => ObsLog.trace(s"stream · tool-use started: $n", traceMaybe).andThen(callbacks.onStatus(s"tool: $n"))
       case _                                => ()
 
     val transport = WireTransport.forMode(rt.apiMode) match

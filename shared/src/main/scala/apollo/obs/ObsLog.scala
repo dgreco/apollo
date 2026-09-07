@@ -9,7 +9,18 @@ import kyo.*
   * lines become a readable console trace, kyo log events, and exported OTLP logs.
   *
   * Content-free by construction: callers pass operation names, enums, counts,
-  * and durations — never prompts, tool arguments, or results. */
+  * and durations — never prompts, tool arguments, or results.
+  *
+  * Level tiers (a threshold shows its level and everything more severe, so
+  * `trace` ⊃ `debug` ⊃ `info` in what reaches the console):
+  *   - `info`  — turn lifecycle: `turn start`, `turn end`.
+  *   - `debug` — per-round operations: `→/← llm.call`, `→/← tool.<name>`,
+  *               `→/← compress`. The "what did the agent do" trace.
+  *   - `trace` — fine sub-operation detail that debug omits: `iteration N`,
+  *               `llm.call first <kind> token · ttft`, `stream · tool-use
+  *               started`, `tool round · N calls`. Fires on every turn, so
+  *               `trace` is always strictly richer than `debug`.
+  *   - `warn`  — recoverable degradation: provider fallover, llm retry. */
 object ObsLog:
 
   private val queue = new java.util.concurrent.ConcurrentLinkedQueue[Otlp.LogRecord]()

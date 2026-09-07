@@ -100,7 +100,10 @@ turn end), each stamped with its trace/span id.
 You don't need any of this just to see a turn: in the REPL, `/trace` prints the
 last turn's span tree and `/metrics` prints the counters + latency histograms —
 both work with zero configuration. `APOLLO_TRACE=1` prints the span tree after
-every response; `APOLLO_LOG_LEVEL=debug` streams the log events to your terminal.
+every response; `APOLLO_LOG_LEVEL=debug` streams the operation events (`→/←
+llm.call`, `→/← tool.*`, compress, retries) to your terminal, and
+`APOLLO_LOG_LEVEL=trace` adds the fine-grained per-turn detail on top —
+iteration cadence, first-token/TTFT, and tool-round entries.
 
 ## Stop / reset
 
