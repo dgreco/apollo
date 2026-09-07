@@ -1,0 +1,51 @@
+# OpenTelemetry Collector pipeline for apollo.
+# Receives OTLP from apollo, fans traces out to Jaeger, exposes metrics for
+# Prometheus to scrape, and prints logs to stdout.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318   # apollo's default target (monitoring.export.otlp.endpoint)
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  # Traces → Jaeger (via OTLP; Jaeger all-in-one has COLLECTOR_OTLP_ENABLED=true).
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Metrics → a Prometheus scrape endpoint on :8889. apollo's dotted metric names
+  # are normalized by Prometheus conventions: apollo.turns → apollo_turns_total,
+  # apollo.turn_ms → apollo_turn_ms_{bucket,sum,count}, etc.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs (and a copy of everything, for eyeballing) → the collector's stdout.
+  debug:
+    verbosity: detailed
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

@@ -1,0 +1,52 @@
+# Local observability stack for apollo's OTLP export.
+#
+#   apollo ──OTLP/HTTP :4318──▶ otel-collector ──┬─▶ jaeger  (traces UI :16686)
+#                                                 ├─▶ prometheus (metrics :9090, scrapes :8889)
+#                                                 └─▶ stdout   (logs — `docker compose logs -f otel-collector`)
+#
+# Usage:
+#   docker compose up -d
+#   # then point apollo at it (see README.md):
+#   #   monitoring.export.otlp.{enabled,metrics,logs}: true
+#   #   monitoring.export.otlp.endpoint: http://localhost:4318
+#   Jaeger UI:     http://localhost:16686   (service "apollo")
+#   Prometheus UI: http://localhost:9090    (query apollo_turns_total, apollo_llm_ms_*)
+#
+# Images are pinned for reproducibility; bump them as you like.
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: apollo-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP/HTTP  ← apollo posts /v1/traces, /v1/metrics, /v1/logs here
+      - "4317:4317"   # OTLP/gRPC  (if you prefer gRPC)
+      - "8889:8889"   # Prometheus scrape endpoint exposed by the collector
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: apollo-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true   # accept OTLP from the collector on 4317/4318
+    ports:
+      - "16686:16686" # Jaeger UI
+    # Jaeger's own OTLP ports (4317/4318) stay on the internal network so they
+    # don't clash with the collector's published ones; the collector reaches it
+    # as jaeger:4317.
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: apollo-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"   # Prometheus UI
+    depends_on:
+      - otel-collector

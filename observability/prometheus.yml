@@ -1,0 +1,11 @@
+# Prometheus scrapes the OTel Collector's Prometheus exporter, where apollo's
+# OTLP metrics are re-exposed.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: apollo-otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
