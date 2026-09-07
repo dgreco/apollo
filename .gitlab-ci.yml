@@ -14,8 +14,8 @@
 #  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test job
 #    uses `testOnly *` to force a full run.
 #  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); it runs on
-#    every pipeline (so Native stays validated) but is kept `allow_failure`
-#    until the native runner is proven reliable — drop that to make it a gate.
+#    every pipeline as a hard gate, so a Native-only regression fails CI. It
+#    needs liburing-dev on the runner (kyo-net's io_uring backend links -luring).
 
 stages:
   - build
@@ -93,16 +93,14 @@ integration:compose:
   after_script:
     - docker compose down -v || true
 
-# --- native binary (manual; heavy toolchain) ----------------------------------
+# --- native binary (heavy toolchain) ------------------------------------------
 
 native:link:
   extends: .sbt
   stage: native
-  # Runs automatically so the Native platform is validated on every pipeline,
-  # not just when someone remembers to click a manual job. Kept allow_failure
-  # for now while the native runner's reliability is proven; drop it to make
-  # Native a hard parity gate.
-  allow_failure: true
+  # A hard parity gate: the Native binary is built and linked on every pipeline,
+  # so a Native-only break (io_uring/OpenSSL linkage, a non-portable API) fails
+  # CI instead of surfacing later. Memory-hungry (.jvmopts sets -Xmx8G).
   before_script:
     # Scala Native links a C/LLVM toolchain plus three native libraries:
     #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
