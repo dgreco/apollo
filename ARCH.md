@@ -328,7 +328,7 @@ sequenceDiagram
   Agent->>Agent: reset interrupt, lazily hydrate nudge counters
   Agent->>Nudge: tick(state, settings)
   Nudge-->>Agent: maybe reminder → append to THIS turn's system prompt
-  Agent->>Store: appendMessage(userMsg)   %% clean, no nudge
+  Agent->>Store: appendMessage(userMsg) — clean, no nudge
   loop until final text / budget / interrupt
     Agent->>Comp: maybeCompress() if near context limit
     Agent->>Altr: repair(messages)
@@ -338,7 +338,7 @@ sequenceDiagram
     Prov-->>Wire: text/thinking/tool-use deltas
     Wire-->>Caller: onEvent → callbacks (render / live-edit)
     Wire-->>Agent: TurnResponse (assistant message)
-    Agent->>Store: appendMessage(assistant)   %% persist BEFORE tools
+    Agent->>Store: appendMessage(assistant) — persist BEFORE tools
     alt no tool calls
       Agent-->>Caller: finish "text_response" (final text)
     else has tool calls
@@ -351,7 +351,7 @@ sequenceDiagram
       Agent->>Agent: iterationsThisTurn += 1 → next loop
     end
   end
-  Note over Agent: close agent.turn span; export traces/metrics/logs (OTLP, if enabled)
+  Note over Agent: close agent.turn span<br/>export traces/metrics/logs (OTLP, if enabled)
   Agent->>Store: updateMeta(count, apiCalls, usage)
   Agent-->>Caller: TurnResult(finalResponse, exitReason, usage)
 ```
