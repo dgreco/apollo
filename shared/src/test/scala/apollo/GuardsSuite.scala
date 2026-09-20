@@ -1,7 +1,6 @@
 package apollo.agent
 
 import apollo.core.*
-import kyo.*
 
 /** Pure guard predicates (repetition + empty-response). */
 class GuardsSuite extends munit.FunSuite:

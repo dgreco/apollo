@@ -1,6 +1,7 @@
 package apollo.provider
 
 import apollo.core.*
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -29,11 +30,11 @@ object BedrockTransport extends WireTransport:
 
   def streamTurn(request: TurnRequest)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+  ): TurnResponse < (Sync & Async & Abort[HttpError]) =
     val rt = request.runtime
     rt.headers.get(hAccessKey) match
       case None =>
-        Abort.fail(ProviderError.Protocol(
+        Abort.fail(HttpError.Protocol(
           "AWS Bedrock needs credentials: set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY " +
             "(and AWS_REGION) in the environment or ~/.apollo/.env."))
       case Some(accessKey) =>
@@ -59,7 +60,7 @@ object BedrockTransport extends WireTransport:
               Jx.parse(text) match
                 case Result.Success(json) =>
                   onEvent(StreamEvent.Done).andThen(Abort.get(parseComplete(json)))
-                case _ => Abort.fail(ProviderError.Protocol("unparseable Bedrock Converse response"))
+                case _ => Abort.fail(HttpError.Protocol("unparseable Bedrock Converse response"))
             }
         }
   end streamTurn
@@ -68,7 +69,7 @@ object BedrockTransport extends WireTransport:
     * and assemble the final response from the accumulated blocks. */
   private def streamConverse(url: String, headers: List[(String, String)], body: String)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+  ): TurnResponse < (Sync & Async & Abort[HttpError]) =
     val acc = new StreamAcc
     Transport.postEventStream(url, headers, body) { frame =>
       frame.messageType match
@@ -135,9 +136,9 @@ object BedrockTransport extends WireTransport:
           Nil
         case _ => Nil
 
-    def result: Result[ProviderError, TurnResponse] =
+    def result: Result[HttpError, TurnResponse] =
       error match
-        case Present(m) => Result.fail(ProviderError.Protocol(s"Bedrock stream error: $m"))
+        case Present(m) => Result.fail(HttpError.Protocol(s"Bedrock stream error: $m"))
         case Absent =>
           val content = blocks.toList.sortBy(_._1).flatMap { (_, b) =>
             if b.isTool then
@@ -239,12 +240,12 @@ object BedrockTransport extends WireTransport:
 
   // --- response parse -----------------------------------------------------
 
-  private[provider] def parseComplete(json: Value): Result[ProviderError, TurnResponse] =
+  private[provider] def parseComplete(json: Value): Result[HttpError, TurnResponse] =
     (json / "output" / "message" / "content").asArr match
       case Absent =>
         (json / "message").asStr.orElse((json / "Message").asStr) match
-          case Present(err) => Result.fail(ProviderError.Protocol(s"Bedrock error: $err"))
-          case Absent       => Result.fail(ProviderError.Protocol(
+          case Present(err) => Result.fail(HttpError.Protocol(s"Bedrock error: $err"))
+          case Absent       => Result.fail(HttpError.Protocol(
             s"Bedrock response has no output message: ${Jx.render(json).take(400)}"))
       case Present(items) =>
         val content = items.toList.flatMap { item =>

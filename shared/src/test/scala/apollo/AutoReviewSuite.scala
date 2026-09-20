@@ -6,7 +6,6 @@ import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.session.SessionStore
 import apollo.tools.*
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** AutoReview: pure cadence/prompt + an E2E where the forked reviewer actually
@@ -78,7 +77,7 @@ class AutoReviewSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "src",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             val history = List(Message.user("please refactor X"), Message.assistant("done, note: you like tabs"))
             AutoReview.runOnce(runtime, ctx, store, history, List("memory", "skill_manage"))

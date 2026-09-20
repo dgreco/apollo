@@ -1,6 +1,7 @@
 package apollo.provider
 
 import apollo.core.*
+import apollo.http.HttpError
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -132,7 +133,7 @@ class BedrockSuite extends munit.FunSuite:
             BedrockTransport.hRegion     -> "us-east-1",
             BedrockTransport.hEndpoint   -> s"http://127.0.0.1:${server.port}"
           ), "anthropic.claude-3-5-sonnet-20241022-v2:0").copy(streaming = false)
-          Abort.run[ProviderError](
+          Abort.run[HttpError](
             BedrockTransport.streamTurn(req(rt, List(Message.user("ping"))))(_ => ())
           )
         case other => throw new AssertionError(s"bind failed: $other")

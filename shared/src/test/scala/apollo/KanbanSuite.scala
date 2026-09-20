@@ -28,7 +28,7 @@ class KanbanSuite extends munit.FunSuite:
       AtomicRef.init(List.empty[TodoItem]).map { todo =>
         val ctx = ToolContext(config = config, paths = paths, cwd = home, platform = "cli", sessionId = "k",
           approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-          ui = apollo.cli.UnattendedToolUi, todo = todo,
+          ui = apollo.tools.UnattendedToolUi, todo = todo,
           skills = new apollo.skills.SkillStore(config, paths))
         for
           c1 <- ToolRegistry.dispatch("kanban", """{"action":"create","text":"first task"}""", ctx).map(_._1)
@@ -53,7 +53,7 @@ class KanbanSuite extends munit.FunSuite:
       AtomicRef.init(List.empty[TodoItem]).map { todo =>
         val ctx = ToolContext(config = config, paths = paths, cwd = home, platform = "cli", sessionId = "k",
           approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-          ui = apollo.cli.UnattendedToolUi, todo = todo,
+          ui = apollo.tools.UnattendedToolUi, todo = todo,
           skills = new apollo.skills.SkillStore(config, paths))
         ToolRegistry.dispatch("kanban", s"""{"action":"complete","id":"$id"}""", ctx).map(_._1)
       }

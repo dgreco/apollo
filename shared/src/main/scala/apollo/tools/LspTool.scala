@@ -1,6 +1,6 @@
 package apollo.tools
 
-import apollo.lsp.{Lsp, LspClient}
+import apollo.lsp.LspClient
 import apollo.util.Jx.*
 import kyo.*
 import kyo.Structure.Value

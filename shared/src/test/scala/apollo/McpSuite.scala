@@ -461,7 +461,7 @@ class McpManagerSuite extends munit.FunSuite:
           sessionId = "test",
           approvals = new apollo.tools.ApprovalService(config, ApolloPaths(home), "cli",
             oneShot = false, yoloFlag = true),
-          ui = apollo.cli.UnattendedToolUi, todo = todo,
+          ui = apollo.tools.UnattendedToolUi, todo = todo,
           skills = new apollo.skills.SkillStore(config, ApolloPaths(home))
         )
         ToolRegistry.dispatch("mcp__fake__echo", """{"text":"hi"}""", ctx)

@@ -6,7 +6,6 @@ import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.session.SessionStore
 import apollo.tools.*
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** `fallback_providers`: a turn fails over to the next configured provider
@@ -72,7 +71,7 @@ class FallbackProvidersSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "fb",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             val flag = new java.util.concurrent.atomic.AtomicBoolean(false)
             val agent = new Agent(primary, ctx, store, "fb", Present(3), flag)

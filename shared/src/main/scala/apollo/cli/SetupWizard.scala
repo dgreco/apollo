@@ -2,6 +2,7 @@ package apollo.cli
 
 import apollo.config.{Fs, ApolloConfig, ApolloPaths}
 import apollo.provider.Profiles
+import apollo.util.Style
 import kyo.*
 
 /** First-run setup: asks provider / API key / model and writes them in the

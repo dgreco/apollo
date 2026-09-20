@@ -1,4 +1,4 @@
-package apollo.provider
+package apollo.http
 
 import apollo.util.{EventStream, Sse, Utf8}
 import kyo.*
@@ -8,13 +8,13 @@ import kyo.*
   *
   * Streaming is deliberately hand-parsed from raw bytes (rather than
   * kyo-http's typed SSE decoding) so that non-2xx error bodies — which are
-  * plain JSON, not event-stream — surface as `ProviderError.Http` with the
+  * plain JSON, not event-stream — surface as `HttpError.Status` with the
   * provider's own message, and so partial UTF-8 sequences split across
   * chunks decode correctly.
   *
   * kyo-http's `sendWith` pins the response callback to `Abort[HttpException]`,
   * so provider-level failures travel out of the callback as `Result` values
-  * and are lifted into `Abort[ProviderError]` afterwards.
+  * and are lifted into `Abort[HttpError]` afterwards.
   */
 object Transport:
 
@@ -39,7 +39,7 @@ object Transport:
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  )(onEvent: Sse.Event => Unit < (Sync & Async)): Unit < (Sync & Async & Abort[ProviderError]) =
+  )(onEvent: Sse.Event => Unit < (Sync & Async)): Unit < (Sync & Async & Abort[HttpError]) =
     withRequest(url, (baseHeaders :+ ("accept" -> "text/event-stream")) ++ headers, body) { req =>
       liftResult {
         HttpClient.withConfig(_.timeout(timeout)) {
@@ -47,7 +47,7 @@ object Transport:
           client.sendWith(streamRoute, req) { resp =>
             if !resp.status.isSuccess then
               collectBytes(resp.fields.body).map { bytes =>
-                Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+                Result.fail(HttpError.Status(resp.status.code, new String(bytes, "UTF-8")))
               }
             else
               // Sequential fold over the byte stream; parser state is local.
@@ -72,13 +72,13 @@ object Transport:
 
   /** POSTs `body` and feeds each decoded AWS eventstream frame to `onFrame` as
     * it arrives (Bedrock ConverseStream). Non-2xx bodies surface as
-    * `ProviderError.Http` with the provider's own message. */
+    * `HttpError.Status` with the provider's own message. */
   def postEventStream(
       url: String,
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  )(onFrame: EventStream.Frame => Unit < (Sync & Async)): Unit < (Sync & Async & Abort[ProviderError]) =
+  )(onFrame: EventStream.Frame => Unit < (Sync & Async)): Unit < (Sync & Async & Abort[HttpError]) =
     withRequest(url, (baseHeaders :+ ("accept" -> "application/vnd.amazon.eventstream")) ++ headers, body) { req =>
       liftResult {
         HttpClient.withConfig(_.timeout(timeout)) {
@@ -86,7 +86,7 @@ object Transport:
           client.sendWith(streamRoute, req) { resp =>
             if !resp.status.isSuccess then
               collectBytes(resp.fields.body).map { bytes =>
-                Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+                Result.fail(HttpError.Status(resp.status.code, new String(bytes, "UTF-8")))
               }
             else
               var esState = EventStream.empty
@@ -106,13 +106,13 @@ object Transport:
   private val binaryReqRoute = HttpRoute.postRaw("").request(_.bodyBinary).response(_.bodyText)
 
   /** POSTs a JSON string body and returns the raw response bytes (e.g. TTS
-    * audio). Non-2xx surfaces as `ProviderError.Http` with the body text. */
+    * audio). Non-2xx surfaces as `HttpError.Status` with the body text. */
   def postJsonToBytes(
       url: String,
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  ): Array[Byte] < (Sync & Async & Abort[ProviderError]) =
+  ): Array[Byte] < (Sync & Async & Abort[HttpError]) =
     withRequest(url, baseHeaders ++ headers, body) { req =>
       liftResult {
         HttpClient.withConfig(_.timeout(timeout)) {
@@ -120,7 +120,7 @@ object Transport:
             client.sendWith(streamRoute, req) { resp =>
               collectBytes(resp.fields.body).map { bytes =>
                 if resp.status.isSuccess then Result.succeed(bytes)
-                else Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+                else Result.fail(HttpError.Status(resp.status.code, new String(bytes, "UTF-8")))
               }
             }
           }
@@ -135,7 +135,7 @@ object Transport:
       headers: List[(String, String)],
       body: Array[Byte],
       timeout: Duration = turnTimeout
-  ): String < (Sync & Async & Abort[ProviderError]) =
+  ): String < (Sync & Async & Abort[HttpError]) =
     HttpRequest.postRaw(url) match
       case Result.Success(base) =>
         val req = (baseHeaders.filterNot(_._1 == "content-type") ++ headers)
@@ -146,12 +146,12 @@ object Transport:
               client.sendWith(binaryReqRoute, req) { resp =>
                 val text = resp.fields.body
                 if resp.status.isSuccess then Result.succeed(text)
-                else Result.fail(ProviderError.Http(resp.status.code, text))
+                else Result.fail(HttpError.Status(resp.status.code, text))
               }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   /** POSTs `body`, returns the full response text. */
   def postJson(
@@ -159,7 +159,7 @@ object Transport:
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  ): String < (Sync & Async & Abort[ProviderError]) =
+  ): String < (Sync & Async & Abort[HttpError]) =
     withRequest(url, baseHeaders ++ headers, body) { req =>
       liftResult {
         HttpClient.withConfig(_.timeout(timeout)) {
@@ -167,7 +167,7 @@ object Transport:
           client.sendWith(textRoute, req) { resp =>
             val text = resp.fields.body
             if resp.status.isSuccess then Result.succeed(text)
-            else Result.fail(ProviderError.Http(resp.status.code, text))
+            else Result.fail(HttpError.Status(resp.status.code, text))
           }
           }
         }
@@ -180,7 +180,7 @@ object Transport:
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  ): String < (Sync & Async & Abort[ProviderError]) =
+  ): String < (Sync & Async & Abort[HttpError]) =
     HttpRequest.patchRaw(url) match
       case Result.Success(base) =>
         val withHeaders = (baseHeaders ++ headers).foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
@@ -191,12 +191,12 @@ object Transport:
               client.sendWith(patchRoute, req) { resp =>
                 val text = resp.fields.body
                 if resp.status.isSuccess then Result.succeed(text)
-                else Result.fail(ProviderError.Http(resp.status.code, text))
+                else Result.fail(HttpError.Status(resp.status.code, text))
               }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   /** PUTs `body`, returns the full response text (e.g. Matrix message sends). */
   def putJson(
@@ -204,7 +204,7 @@ object Transport:
       headers: List[(String, String)],
       body: String,
       timeout: Duration = turnTimeout
-  ): String < (Sync & Async & Abort[ProviderError]) =
+  ): String < (Sync & Async & Abort[HttpError]) =
     HttpRequest.putRaw(url) match
       case Result.Success(base) =>
         val withHeaders = (baseHeaders ++ headers).foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
@@ -215,19 +215,19 @@ object Transport:
               client.sendWith(putRoute, req) { resp =>
                 val text = resp.fields.body
                 if resp.status.isSuccess then Result.succeed(text)
-                else Result.fail(ProviderError.Http(resp.status.code, text))
+                else Result.fail(HttpError.Status(resp.status.code, text))
               }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   /** PUT with an empty body (e.g. Discord reaction adds). */
   def putEmpty(
       url: String,
       headers: List[(String, String)],
       timeout: Duration = 15.seconds
-  ): Unit < (Sync & Async & Abort[ProviderError]) =
+  ): Unit < (Sync & Async & Abort[HttpError]) =
     emptyBodied(HttpRequest.putRaw(url), url, headers, timeout)
 
   /** DELETE with an empty body (e.g. Discord reaction removes). */
@@ -235,7 +235,7 @@ object Transport:
       url: String,
       headers: List[(String, String)],
       timeout: Duration = 15.seconds
-  ): Unit < (Sync & Async & Abort[ProviderError]) =
+  ): Unit < (Sync & Async & Abort[HttpError]) =
     emptyBodied(HttpRequest.deleteRaw(url), url, headers, timeout)
 
   private val emptyRoute = HttpRoute.getRaw("").response(_.bodyText)
@@ -245,7 +245,7 @@ object Transport:
       url: String,
       headers: List[(String, String)],
       timeout: Duration
-  ): Unit < (Sync & Async & Abort[ProviderError]) =
+  ): Unit < (Sync & Async & Abort[HttpError]) =
     parsed match
       case Result.Success(base) =>
         val req = headers.foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
@@ -254,12 +254,12 @@ object Transport:
             HttpClient.use { client =>
               client.sendWith(emptyRoute, req) { resp =>
                 if resp.status.isSuccess then Result.succeed(())
-                else Result.fail(ProviderError.Http(resp.status.code, resp.fields.body))
+                else Result.fail(HttpError.Status(resp.status.code, resp.fields.body))
               }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   /** GET returning the response text (catalogs, health checks, page
     * fetches, long polls — callers with a longer server-side hold pass
@@ -269,7 +269,7 @@ object Transport:
       url: String,
       headers: List[(String, String)],
       timeout: Duration = 30.seconds
-  ): String < (Sync & Async & Abort[ProviderError]) =
+  ): String < (Sync & Async & Abort[HttpError]) =
     HttpRequest.getRaw(url) match
       case Result.Success(base) =>
         val req = headers.foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
@@ -279,22 +279,22 @@ object Transport:
             client.sendWith(getRoute, req) { resp =>
               val text = resp.fields.body
               if resp.status.isSuccess then Result.succeed(text)
-              else Result.fail(ProviderError.Http(resp.status.code, text))
+              else Result.fail(HttpError.Status(resp.status.code, text))
             }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   private val getBytesRoute = HttpRoute.getRaw("").response(_.bodyStream)
 
   /** GET returning the raw response bytes (binary downloads — e.g. a rendered
-    * video file). Non-2xx surfaces as `ProviderError.Http` with the body text. */
+    * video file). Non-2xx surfaces as `HttpError.Status` with the body text. */
   def getBytes(
       url: String,
       headers: List[(String, String)],
       timeout: Duration = turnTimeout
-  ): Array[Byte] < (Sync & Async & Abort[ProviderError]) =
+  ): Array[Byte] < (Sync & Async & Abort[HttpError]) =
     HttpRequest.getRaw(url) match
       case Result.Success(base) =>
         val req = headers.foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
@@ -304,40 +304,40 @@ object Transport:
               client.sendWith(getBytesRoute, req) { resp =>
                 collectBytes(resp.fields.body).map { bytes =>
                   if resp.status.isSuccess then Result.succeed(bytes)
-                  else Result.fail(ProviderError.Http(resp.status.code, new String(bytes, "UTF-8")))
+                  else Result.fail(HttpError.Status(resp.status.code, new String(bytes, "UTF-8")))
                 }
               }
             }
           }
         }
-      case _ => Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+      case _ => Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   // -----------------------------------------------------------------------
 
   private def withRequest[A](url: String, headers: List[(String, String)], body: String)(
-      f: HttpRequest["body" ~ String] => A < (Sync & Async & Abort[ProviderError])
-  ): A < (Sync & Async & Abort[ProviderError]) =
+      f: HttpRequest["body" ~ String] => A < (Sync & Async & Abort[HttpError])
+  ): A < (Sync & Async & Abort[HttpError]) =
     HttpRequest.postRaw(url) match
       case Result.Success(base) =>
         val withHeaders = headers.foldLeft(base)((r, h) => r.setHeader(h._1, h._2))
         f(withHeaders.addField("body", body))
       case _ =>
-        Abort.fail(ProviderError.Network(s"invalid URL: $url"))
+        Abort.fail(HttpError.Network(s"invalid URL: $url"))
 
   private def collectBytes(
       stream: Stream[Span[Byte], Async]
   ): Array[Byte] < (Sync & Async) =
     stream.fold(Array.emptyByteArray)((acc, span) => acc ++ span.toArray)
 
-  /** Converts transport-level `HttpException` aborts to `ProviderError` and
+  /** Converts transport-level `HttpException` aborts to `HttpError` and
     * lifts callback-carried `Result` failures into the effect channel.
     */
   private def liftResult[A](
-      v: Result[ProviderError, A] < (Sync & Async & Abort[HttpException])
-  ): A < (Sync & Async & Abort[ProviderError]) =
+      v: Result[HttpError, A] < (Sync & Async & Abort[HttpException])
+  ): A < (Sync & Async & Abort[HttpError]) =
     Abort.run[HttpException](v).map {
       case Result.Success(r)     => Abort.get(r)
-      case Result.Failure(e)     => Abort.fail(ProviderError.Network(e.getMessage))
+      case Result.Failure(e)     => Abort.fail(HttpError.Network(e.getMessage))
       case Result.Panic(e)       => Abort.panic(e)
     }
 end Transport

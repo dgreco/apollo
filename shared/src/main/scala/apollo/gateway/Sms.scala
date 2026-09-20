@@ -1,7 +1,7 @@
 package apollo.gateway
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Crypto
 import kyo.*
 
@@ -117,7 +117,7 @@ object Sms:
       val url     = s"$base/2010-04-01/Accounts/$sid/Messages.json"
       val headers = List("authorization" -> basicAuth(sid, tok),
         "content-type" -> "application/x-www-form-urlencoded")
-      Abort.run[ProviderError](Transport.postJson(url, headers, sendBody(from, to, text), timeout = 30.seconds)).map {
+      Abort.run[HttpError](Transport.postJson(url, headers, sendBody(from, to, text), timeout = 30.seconds)).map {
         case Result.Success(_) => ()
         case Result.Failure(e) => Console.printLine(s"sms: send failed: ${e.getMessage.take(200)}")
         case Result.Panic(e)   => Console.printLine(s"sms: send failed: ${String.valueOf(e.getMessage)}")

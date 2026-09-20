@@ -43,7 +43,7 @@ class ImageGenSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "ig",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             ToolRegistry.dispatch("image_generate", """{"prompt":"a cat","filename":"out.png"}""", ctx)
               .map((o, _) => (o, home))
@@ -65,7 +65,7 @@ class ImageGenSuite extends munit.FunSuite:
         val ctx = ToolContext(
           config = config, paths = paths, cwd = home, platform = "cli", sessionId = "ig",
           approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-          ui = apollo.cli.UnattendedToolUi, todo = todo,
+          ui = apollo.tools.UnattendedToolUi, todo = todo,
           skills = new apollo.skills.SkillStore(config, paths))
         ToolRegistry.dispatch("image_generate", """{"prompt":"x"}""", ctx).map(_._1)
       }

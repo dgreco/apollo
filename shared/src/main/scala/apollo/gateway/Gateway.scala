@@ -1,14 +1,15 @@
 package apollo.gateway
 
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
-import apollo.cli.{CliArgs, Style, UnattendedToolUi}
+import apollo.config.BuildInfo
+import apollo.config.Yaml.*
 import apollo.config.{ApolloConfig, ApolloPaths}
 import apollo.core.Message
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore, HandoffStore}
 import apollo.skills.SkillStore
 import apollo.tools.*
-import apollo.config.Yaml.*
+import apollo.util.Style
 import kyo.*
 
 /** The messaging gateway: one process hosting the platform connectors this
@@ -55,7 +56,7 @@ object Gateway:
         val mcpStart = apollo.mcp.McpManager.start(
           config, paths,
           java.nio.file.Paths.get(".").toAbsolutePath.normalize,
-          Absent, apollo.cli.Cli.version
+          Absent, BuildInfo.version
         )
         val hub = new SessionHub(config, paths, runtime)
         // Telegram contributes a FLAT list of peer fibers (poll + consumers).
@@ -111,7 +112,7 @@ object Gateway:
               imessageServices ++ emailServices
               ++ (if apiEnabled then List(ApiServer.serve(config, hub, apiKey)) else Nil)
               ++ (if webhookEnabled then List(Webhook.serve(config, hub, webhookSecret)) else Nil)
-              ++ List(apollo.cron.Scheduler.runLoop(config, paths))
+              ++ List(CronScheduler.runLoop(config, paths))
           if platformCount == 0 then
             Console.printLine(
               "gateway: no platforms configured. Set TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, " +

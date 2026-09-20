@@ -35,7 +35,6 @@ class LspSuite extends munit.FunSuite:
   }
 
   test("publishDiagnosticsFor matches uri and parses ranges/severity") {
-    import Jx.*
     val note = Jx.parse(
       """{"method":"textDocument/publishDiagnostics","params":{"uri":"file:///a.py","diagnostics":[
         {"severity":1,"range":{"start":{"line":4,"character":2}},"message":"undefined name"}]}}""").getOrElse(Jx.obj())

@@ -58,7 +58,7 @@ class NudgeIntegrationSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "nudge-test",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             val flag = new java.util.concurrent.atomic.AtomicBoolean(false)
             val agent = new Agent(runtime, ctx, store, "nudge-test", Present(5), flag)

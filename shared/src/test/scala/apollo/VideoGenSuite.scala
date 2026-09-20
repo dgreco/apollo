@@ -57,7 +57,7 @@ class VideoGenSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "vg",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             ToolRegistry.dispatch("video_generate", """{"prompt":"a dog","filename":"out.mp4"}""", ctx)
               .map((o, _) => (o, home))
@@ -78,7 +78,7 @@ class VideoGenSuite extends munit.FunSuite:
         val ctx = ToolContext(
           config = config, paths = paths, cwd = home, platform = "cli", sessionId = "vg",
           approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-          ui = apollo.cli.UnattendedToolUi, todo = todo,
+          ui = apollo.tools.UnattendedToolUi, todo = todo,
           skills = new apollo.skills.SkillStore(config, paths))
         ToolRegistry.dispatch("video_generate", """{"prompt":"x"}""", ctx).map(_._1)
       }

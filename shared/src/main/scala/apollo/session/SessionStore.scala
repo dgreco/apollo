@@ -2,8 +2,6 @@ package apollo.session
 
 import apollo.config.{Fs, ApolloPaths}
 import apollo.core.{Message, Usage}
-import apollo.util.Jx
-import apollo.util.Jx.*
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZoneId}
 import kyo.*

@@ -10,6 +10,7 @@ val kyoVersion       = "1.0.0-RC6"
 val scalaYamlVersion = "0.3.3"
 val jlineVersion     = "4.4.2"
 val munitVersion     = "1.3.6"
+val archunitVersion  = "1.5.0"
 val sqliteVersion    = "3.47.1.0"
 
 inThisBuild(
@@ -75,6 +76,10 @@ lazy val agent = crossProject(JVMPlatform, NativePlatform)
   )
   .jvmSettings(
     libraryDependencies += "org.jline" % "jline" % jlineVersion,
+    // ArchUnit reads JVM bytecode, so the architecture suite is JVM-only — but
+    // it governs the whole shared codebase, which is where all but three
+    // classes live (see ArchitectureSuite).
+    libraryDependencies += "com.tngtech.archunit" % "archunit" % archunitVersion % Test,
     // JVM-only: SQLite (FTS5 compiled in) backs session search. Scala Native
     // has no bundled SQLite, so it keeps the pure-Scala transcript scan and
     // this dependency never reaches the native binary.

@@ -1,7 +1,7 @@
 package apollo.gateway
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -139,7 +139,7 @@ object WhatsApp:
       Console.printLine("whatsapp: WHATSAPP_TOKEN / phone id missing; cannot send")
     else
       val url = s"$base/$apiVersion/$pid/messages"
-      Abort.run[ProviderError](
+      Abort.run[HttpError](
         Transport.postJson(url, List("authorization" -> s"Bearer $token"), sendBody(to, text), timeout = 30.seconds)
       ).map {
         case Result.Success(_) => ()

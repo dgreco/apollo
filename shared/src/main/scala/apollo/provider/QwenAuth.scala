@@ -1,8 +1,9 @@
 package apollo.provider
 
 import apollo.config.{ApolloPaths, Fs}
-import apollo.util.{Crypto, Jx}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx.*
+import apollo.util.{Crypto, Jx}
 import kyo.*
 import kyo.Structure.Value
 
@@ -161,7 +162,7 @@ object QwenAuth:
       val challenge = Crypto.pkceChallenge(verifier)
       val body = form("client_id" -> clientId, "scope" -> scope,
         "code_challenge" -> challenge, "code_challenge_method" -> "S256")
-      Abort.run[ProviderError](Transport.postJson(deviceCodeUrl, formHeader, body)).map {
+      Abort.run[HttpError](Transport.postJson(deviceCodeUrl, formHeader, body)).map {
         case Result.Success(b) =>
           Jx.parse(b) match
             case Result.Success(j) => parseDeviceCode(j, verifier)
@@ -175,7 +176,7 @@ object QwenAuth:
     Sync.defer(java.lang.System.currentTimeMillis()).map { now =>
       val body = form("grant_type" -> grantType, "client_id" -> clientId,
         "device_code" -> deviceCode, "code_verifier" -> verifier)
-      Abort.run[ProviderError](Transport.postJson(tokenUrl, formHeader, body)).map {
+      Abort.run[HttpError](Transport.postJson(tokenUrl, formHeader, body)).map {
         case Result.Success(b) =>
           Jx.parse(b) match
             case Result.Success(j) => classifyPoll(j, now)
@@ -190,7 +191,7 @@ object QwenAuth:
     Sync.defer(java.lang.System.currentTimeMillis()).map { now =>
       val body = form("grant_type" -> "refresh_token", "client_id" -> clientId,
         "refresh_token" -> refreshToken)
-      Abort.run[ProviderError](Transport.postJson(tokenUrl, formHeader, body)).map {
+      Abort.run[HttpError](Transport.postJson(tokenUrl, formHeader, body)).map {
         case Result.Success(b) =>
           Jx.parse(b) match
             case Result.Success(j) => parseTokenBundle(j, now)

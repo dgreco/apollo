@@ -1,7 +1,7 @@
 package apollo.tools
 
 import apollo.config.Fs
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -102,7 +102,7 @@ object VoiceTools:
                 val voice = (args / "voice").asStr.getOrElse(cfg.ttsVoice)
                 val body  = speechBody(cfg.ttsModel, text, voice, cfg.ttsFormat)
                 val url   = s"${cfg.ttsApiBase.stripSuffix("/")}/audio/speech"
-                Abort.run[ProviderError](Transport.postJsonToBytes(url, List("authorization" -> s"Bearer $key"), body)).map {
+                Abort.run[HttpError](Transport.postJsonToBytes(url, List("authorization" -> s"Bearer $key"), body)).map {
                   case Result.Success(bytes) =>
                     val name = (args / "filename").asStr.getOrElse(
                       s"speech-${java.util.UUID.randomUUID.toString.take(8)}.${audioExt(cfg.ttsFormat)}")
@@ -128,7 +128,7 @@ object VoiceTools:
             val url      = s"${ctx.config.sttApiBase.stripSuffix("/")}/audio/transcriptions"
             val headers  = List("authorization" -> s"Bearer $key",
               "content-type" -> s"multipart/form-data; boundary=$boundary")
-            Abort.run[ProviderError](Transport.postBinary(url, headers, bodyB)).map {
+            Abort.run[HttpError](Transport.postBinary(url, headers, bodyB)).map {
               case Result.Success(resp) =>
                 Jx.parse(resp) match
                   case Result.Success(j) => parseTranscript(j) match

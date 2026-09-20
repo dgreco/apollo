@@ -1,7 +1,7 @@
 package apollo.tools
 
 import apollo.config.Fs
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -50,7 +50,7 @@ object ImageGen:
             val size = (args / "size").asStr.getOrElse("1024x1024")
             val url  = s"${ctx.config.imageApiBase.stripSuffix("/")}/images/generations"
             val body = buildBody(ctx.config.imageModel, prompt, size, 1)
-            Abort.run[ProviderError](Transport.postJson(url, List("authorization" -> s"Bearer $key"), body)).map {
+            Abort.run[HttpError](Transport.postJson(url, List("authorization" -> s"Bearer $key"), body)).map {
               case Result.Success(resp) =>
                 Jx.parse(resp) match
                   case Result.Success(j) =>

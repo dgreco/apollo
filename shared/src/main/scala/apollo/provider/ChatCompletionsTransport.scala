@@ -1,8 +1,9 @@
 package apollo.provider
 
 import apollo.core.*
-import apollo.util.{Jx, Sse}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx.*
+import apollo.util.{Jx, Sse}
 import kyo.*
 import kyo.Structure.Value
 
@@ -19,7 +20,7 @@ object ChatCompletionsTransport extends WireTransport:
 
   def streamTurn(request: TurnRequest)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+  ): TurnResponse < (Sync & Async & Abort[HttpError]) =
     val rt   = request.runtime
     val url  = s"${rt.baseUrl}/chat/completions"
     val body = buildBody(request, stream = rt.streaming)
@@ -31,8 +32,8 @@ object ChatCompletionsTransport extends WireTransport:
       Transport.postJson(url, authHeaders(rt), Jx.render(body)).map { text =>
         Jx.parse(text) match
           case Result.Success(json) => Abort.get(parseComplete(json))
-          case Result.Failure(err)  => Abort.fail(ProviderError.Protocol(s"unparseable response: $err"))
-          case _                    => Abort.fail(ProviderError.Protocol("unparseable response"))
+          case Result.Failure(err)  => Abort.fail(HttpError.Protocol(s"unparseable response: $err"))
+          case _                    => Abort.fail(HttpError.Protocol("unparseable response"))
       }
   end streamTurn
 
@@ -154,7 +155,7 @@ object ChatCompletionsTransport extends WireTransport:
     private var finishReason   = ""
     private var usage          = Usage.zero
     private var toolCalls      = Vector.empty[ToolCallAcc]
-    private var streamError    = Maybe.empty[ProviderError]
+    private var streamError    = Maybe.empty[HttpError]
 
     private final class ToolCallAcc(var id: String, var name: String):
       val args = new StringBuilder
@@ -172,7 +173,7 @@ object ChatCompletionsTransport extends WireTransport:
       // Some providers (DeepInfra) report errors as in-stream chunks.
       (json / "error").map(e => (e / "message").asStr.getOrElse(Jx.render(e))) match
         case Present(err) =>
-          streamError = Present(ProviderError.Protocol(s"in-stream provider error: $err"))
+          streamError = Present(HttpError.Protocol(s"in-stream provider error: $err"))
           ()
         case Absent =>
           (json / "usage").map(u => usage = parseUsage(u))
@@ -205,7 +206,7 @@ object ChatCompletionsTransport extends WireTransport:
       val argEvent   = if argDelta.nonEmpty then List(StreamEvent.ToolUseArgsDelta(acc.id, argDelta)) else Nil
       startEvent ++ argEvent
 
-    def finish(): Result[ProviderError, TurnResponse] =
+    def finish(): Result[HttpError, TurnResponse] =
       streamError match
         case Present(err) => Result.fail(err)
         case Absent =>
@@ -226,10 +227,10 @@ object ChatCompletionsTransport extends WireTransport:
 
   // --- non-streaming ------------------------------------------------------
 
-  private def parseComplete(json: Value): Result[ProviderError, TurnResponse] =
+  private def parseComplete(json: Value): Result[HttpError, TurnResponse] =
     (json / "choices").asArr.flatMap(cs => Maybe.fromOption(cs.headOption)) match
       case Absent =>
-        Result.fail(ProviderError.Protocol(s"response has no choices: ${Jx.render(json).take(500)}"))
+        Result.fail(HttpError.Protocol(s"response has no choices: ${Jx.render(json).take(500)}"))
       case Present(choice) =>
         val msg          = choice / "message"
         val text         = (msg / "content").asStr.getOrElse("")

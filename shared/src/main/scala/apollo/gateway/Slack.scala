@@ -2,7 +2,7 @@ package apollo.gateway
 
 import apollo.agent.TurnCallbacks
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -74,7 +74,7 @@ object Slack:
   private def post(
       token: String, method: String, body: Value, env: String => Maybe[String]
   ): Maybe[Value] < (Sync & Async) =
-    Abort.run[ProviderError](Transport.postJson(
+    Abort.run[HttpError](Transport.postJson(
       s"${apiBase(env)}/$method", List("authorization" -> s"Bearer $token"),
       Jx.render(body), timeout = 30.seconds)).map {
       case Result.Success(resp) =>

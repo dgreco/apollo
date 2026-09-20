@@ -2,7 +2,7 @@ package apollo.gateway
 
 import apollo.agent.TurnCallbacks
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -145,7 +145,7 @@ object Discord:
           "message_id" -> Jx.str(id), "fail_if_not_exists" -> Jx.bool(false)
         ))
       ))
-      Abort.run[ProviderError](Transport.postJson(
+      Abort.run[HttpError](Transport.postJson(
         s"${apiBase(env)}/channels/$channelId/messages", authHeaders(token), body, timeout = 30.seconds
       )).map {
         case Result.Success(_) => ()
@@ -197,7 +197,7 @@ object Discord:
         "message_reference" -> replyTo.map(id => Jx.obj(
           "message_id" -> Jx.str(id), "fail_if_not_exists" -> Jx.bool(false)))
       ))
-      Abort.run[ProviderError](Transport.postJson(
+      Abort.run[HttpError](Transport.postJson(
         s"${apiBase(env)}/channels/$channelId/messages", authHeaders(token), body, timeout = 30.seconds
       )).map {
         case Result.Success(resp) =>
@@ -212,12 +212,12 @@ object Discord:
       token: String, channelId: String, messageId: String, text: String, env: String => Maybe[String]
   ): Unit < (Sync & Async) =
     val body = Jx.render(Jx.obj("content" -> Jx.str(text.take(maxMessage))))
-    Abort.run[ProviderError](Transport.patchJson(
+    Abort.run[HttpError](Transport.patchJson(
       s"${apiBase(env)}/channels/$channelId/messages/$messageId", authHeaders(token), body, timeout = 30.seconds
     )).unit
 
   private def typing(token: String, channelId: String, env: String => Maybe[String]): Unit < (Sync & Async) =
-    Abort.run[ProviderError](Transport.postJson(
+    Abort.run[HttpError](Transport.postJson(
       s"${apiBase(env)}/channels/$channelId/typing", authHeaders(token), "", timeout = 15.seconds
     )).unit
 
@@ -226,14 +226,14 @@ object Discord:
   ): Unit < (Sync & Async) =
     val encoded = java.net.URLEncoder.encode(emoji, "UTF-8")
     val url = s"${apiBase(env)}/channels/$channelId/messages/$messageId/reactions/$encoded/@me"
-    Abort.run[ProviderError](Transport.putEmpty(url, authHeaders(token))).unit
+    Abort.run[HttpError](Transport.putEmpty(url, authHeaders(token))).unit
 
   private def unreact(
       token: String, channelId: String, messageId: String, emoji: String, env: String => Maybe[String]
   ): Unit < (Sync & Async) =
     val encoded = java.net.URLEncoder.encode(emoji, "UTF-8")
     val url = s"${apiBase(env)}/channels/$channelId/messages/$messageId/reactions/$encoded/@me"
-    Abort.run[ProviderError](Transport.deleteEmpty(url, authHeaders(token))).unit
+    Abort.run[HttpError](Transport.deleteEmpty(url, authHeaders(token))).unit
 
   // --- services ------------------------------------------------------------
 

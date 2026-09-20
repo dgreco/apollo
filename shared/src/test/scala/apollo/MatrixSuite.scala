@@ -3,7 +3,6 @@ package apollo.gateway
 import apollo.config.{ApolloConfig, ApolloPaths, EnvChain}
 import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 import kyo.Structure.Value
 

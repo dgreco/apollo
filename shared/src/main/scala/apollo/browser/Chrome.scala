@@ -1,9 +1,8 @@
 package apollo.browser
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** Headless-Chrome lifecycle for the browser tool: locate a Chrome/Chromium
@@ -61,7 +60,7 @@ object Chrome:
 
   /** A page target's debugger WS URL from `<base>/json`. */
   def pageWs(cdpBase: String): Result[String, String] < (Sync & Async) =
-    Abort.run[ProviderError](Transport.getJson(s"$cdpBase/json", Nil, 10.seconds)).map {
+    Abort.run[HttpError](Transport.getJson(s"$cdpBase/json", Nil, 10.seconds)).map {
       case Result.Success(body) =>
         Jx.parse(body) match
           case Result.Success(j) => Cdp.firstPageWs(j) match
@@ -102,7 +101,7 @@ object Chrome:
   private def waitReady(base: String, tries: Int): Boolean < (Sync & Async) =
     if tries <= 0 then false
     else
-      Abort.run[ProviderError](Transport.getJson(s"$base/json/version", Nil, 2.seconds)).map {
+      Abort.run[HttpError](Transport.getJson(s"$base/json/version", Nil, 2.seconds)).map {
         case Result.Success(_) => true
         case _                 => Async.sleep(250.millis).andThen(waitReady(base, tries - 1))
       }

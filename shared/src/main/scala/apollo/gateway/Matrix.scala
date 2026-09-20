@@ -1,7 +1,7 @@
 package apollo.gateway
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -41,7 +41,7 @@ object Matrix:
   ): Unit < (Sync & Async) =
     whoami(homeserver, token).map { self =>
       // Initial sync (no `since`): take next_batch, ignore the backlog.
-      Abort.run[ProviderError](Transport.getJson(s"${base(homeserver)}/sync?timeout=0", auth(token), timeout = 30.seconds)).map {
+      Abort.run[HttpError](Transport.getJson(s"${base(homeserver)}/sync?timeout=0", auth(token), timeout = 30.seconds)).map {
         case Result.Success(body) =>
           val (nb, _) = parseSync(Jx.parse(body).getOrElse(Jx.obj()))
           poll(homeserver, token, config, hub, queue, self, nb)
@@ -50,7 +50,7 @@ object Matrix:
     }
 
   private def whoami(homeserver: String, token: String): Maybe[String] < (Sync & Async) =
-    Abort.run[ProviderError](Transport.getJson(s"${base(homeserver)}/account/whoami", auth(token), timeout = 15.seconds)).map {
+    Abort.run[HttpError](Transport.getJson(s"${base(homeserver)}/account/whoami", auth(token), timeout = 15.seconds)).map {
       case Result.Success(body) => (Jx.parse(body).getOrElse(Jx.obj()) / "user_id").asStr
       case _                    => sys.env.get("MATRIX_USER_ID") match { case Some(u) => Present(u); case None => Absent }
     }
@@ -76,7 +76,7 @@ object Matrix:
       queue: Channel[Job], self: Maybe[String], since: Maybe[String]
   ): Unit < (Sync & Async) =
     val sinceParam = since.map(s => "&since=" + java.net.URLEncoder.encode(s, "UTF-8")).getOrElse("")
-    Abort.run[ProviderError] {
+    Abort.run[HttpError] {
       Transport.getJson(s"${base(homeserver)}/sync?timeout=30000$sinceParam", auth(token), timeout = 55.seconds)
     }.map {
       case Result.Success(body) =>
@@ -154,7 +154,7 @@ object Matrix:
     val txn = s"apollo-$txnBase-${txnSeq.incrementAndGet()}"
     val url = s"${base(homeserver)}/rooms/${java.net.URLEncoder.encode(room, "UTF-8")}/send/m.room.message/$txn"
     val body = Jx.render(Jx.obj("msgtype" -> Jx.str("m.text"), "body" -> Jx.str(text)))
-    Abort.run[ProviderError](Transport.putJson(url, auth(token), body, timeout = 30.seconds)).map {
+    Abort.run[HttpError](Transport.putJson(url, auth(token), body, timeout = 30.seconds)).map {
       case Result.Success(_) => ()
       case Result.Failure(e) => Console.printLine(s"matrix: send failed: ${e.getMessage.take(200)}")
       case Result.Panic(e)   => Console.printLine(s"matrix: send failed: ${String.valueOf(e.getMessage)}")

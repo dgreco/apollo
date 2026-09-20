@@ -1,8 +1,9 @@
 package apollo.provider
 
 import apollo.core.*
-import apollo.util.{Jx, Sse}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx.*
+import apollo.util.{Jx, Sse}
 import kyo.*
 import kyo.Structure.Value
 
@@ -13,7 +14,7 @@ object ResponsesTransport extends WireTransport:
 
   def streamTurn(request: TurnRequest)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+  ): TurnResponse < (Sync & Async & Abort[HttpError]) =
     val rt  = request.runtime
     val url = s"${rt.baseUrl}/responses"
     if rt.streaming then
@@ -26,7 +27,7 @@ object ResponsesTransport extends WireTransport:
           case Result.Success(json) => Abort.get(parseResponseObject(json / "response" match
             case Present(inner) => inner
             case Absent         => json))
-          case _ => Abort.fail(ProviderError.Protocol("unparseable Responses payload"))
+          case _ => Abort.fail(HttpError.Protocol("unparseable Responses payload"))
       }
   end streamTurn
 
@@ -117,7 +118,7 @@ object ResponsesTransport extends WireTransport:
     private var byItemId    = Map.empty[String, Int]
     private var usage       = Usage.zero
     private var status      = ""
-    private var streamError = Maybe.empty[ProviderError]
+    private var streamError = Maybe.empty[HttpError]
 
     def onSse(event: Sse.Event): Unit < (Sync & Async) =
       val data = event.data.trim
@@ -174,17 +175,17 @@ object ResponsesTransport extends WireTransport:
           (resp / "usage").map(u => usage = parseUsage(u))
           if status == "failed" then
             val msg = (resp / "error" / "message").asStr.getOrElse("response.failed")
-            streamError = Present(ProviderError.Protocol(msg))
+            streamError = Present(HttpError.Protocol(msg))
           ()
         case "error" =>
           streamError = Present(
-            ProviderError.Protocol((json / "message").asStr.getOrElse(Jx.render(json).take(500)))
+            HttpError.Protocol((json / "message").asStr.getOrElse(Jx.render(json).take(500)))
           )
           ()
         case _ => ()
     end process
 
-    def finish(): Result[ProviderError, TurnResponse] =
+    def finish(): Result[HttpError, TurnResponse] =
       streamError match
         case Present(err) => Result.fail(err)
         case Absent =>
@@ -203,10 +204,10 @@ object ResponsesTransport extends WireTransport:
 
   // --- non-streaming ------------------------------------------------------
 
-  private def parseResponseObject(resp: Value): Result[ProviderError, TurnResponse] =
+  private def parseResponseObject(resp: Value): Result[HttpError, TurnResponse] =
     (resp / "output").asArr match
       case Absent =>
-        Result.fail(ProviderError.Protocol(s"Responses payload has no output: ${Jx.render(resp).take(500)}"))
+        Result.fail(HttpError.Protocol(s"Responses payload has no output: ${Jx.render(resp).take(500)}"))
       case Present(items) =>
         val texts = new StringBuilder
         val reasoningTexts = new StringBuilder

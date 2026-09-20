@@ -105,8 +105,10 @@ C4Container
 | **Tool layer** | `apollo.tools` | The built-in tool registry, toolset resolution, and the shell-command approval gate. Includes browser (CDP), computer-use, voice/image/video, checkpoints, kanban, and the **LSP** client tool (`apollo.lsp`). |
 | **MCP subsystem** | `apollo.mcp` | Spawn/connect MCP servers, OAuth, keep them alive (reliability ladder), register their tools dynamically, and serve server→client **sampling / elicitation** requests. |
 | **Observability** | `apollo.obs` | A content-free per-turn trace tree (`agent.turn → llm.call → tool.*`), cumulative metrics (`kyo-stats` histograms + counters), and structured logs (`kyo.Log`); `/trace` + `/metrics` in the REPL and fire-and-forget OTLP/HTTP export. |
-| **Config + home** | `apollo.config` | Home/profile resolution, env layering, YAML parsing, managed scope, `${VAR}` expansion, secret-source resolution. |
+| **Config + home** | `apollo.config` | Home/profile resolution, env layering, YAML parsing, managed scope, `${VAR}` expansion, secret-source resolution, build metadata. |
 | **Session store** | `apollo.session` | JSONL transcripts + a JSON index under `scala-state/`; FTS5 search on the JVM, transcript scan on Native. |
+| **HTTP client** | `apollo.http` | `Transport` (POST/SSE/PATCH/GET, hand-parsed SSE) and `HttpError`. Used by *every* subsystem that speaks HTTP — providers, MCP, chat connectors, CDP, skills, OTLP — so it sits below all of them rather than inside the provider layer. |
+| **Kernel** | `apollo.util`, `apollo.core` | Pure data and pure functions: the conversation model (`Message`/`Content`/`Usage`), JSON helpers (`Jx`), SSE and eventstream decoders, UTF-8 chunking, portable crypto, ANSI styling. Depends on nothing else in apollo and uses no Kyo effect. |
 
 ---
 
@@ -158,7 +160,7 @@ C4Component
     Component(profiles, "Profiles", "registry", "Every provider slug/alias, base URL, key env vars, api mode")
     Component(wire, "WireTransport", "forMode(apiMode)", "Selects the adapter for a runtime")
     Component(chat, "ChatCompletions / Anthropic / Responses / Bedrock", "adapters", "Build request, stream SSE, assemble TurnResponse")
-    Component(http, "Transport", "POST/SSE/PATCH", "Raw HTTP + hand-parsed SSE; SigV4 for Bedrock")
+    Component(http, "apollo.http.Transport", "POST/SSE/PATCH", "Raw HTTP + hand-parsed SSE (shared; SigV4 signing stays here)")
   }
   Container(agent, "Agent core")
   System_Ext(provider, "Model provider")
@@ -232,9 +234,10 @@ final case class TurnRequest(runtime: ResolvedRuntime, systemPrompt: String,
 final case class TurnResponse(message: Message, stopReason: StopReason, usage: Usage)
 
 // A provider protocol is a callback-shaped streamer (apollo.provider).
+// It fails with the shared transport error (apollo.http), not a provider-specific one.
 trait WireTransport:
   def streamTurn(req: TurnRequest)(onEvent: StreamEvent => Unit < (Sync & Async))
-      : TurnResponse < (Sync & Async & Abort[ProviderError])
+      : TurnResponse < (Sync & Async & Abort[HttpError])
 
 // A registered tool (apollo.tools). MCP tools are ToolEntry values too.
 final case class ToolEntry(name: String, toolset: String, description: String,
@@ -284,6 +287,79 @@ or `Future`.
   separately. Logs go through `kyo.Log` (`apollo.obs.ObsLog`). Export is
   content-free, native-safe, hand-rolled OTLP/HTTP JSON (no OTel SDK): fired
   fire-and-forget in `finishTurn`, gated by `monitoring.export.otlp.*`.
+
+---
+
+## The layering, and how it is enforced
+
+Everything above is a description; `jvm/src/test/scala/apollo/arch/ArchitectureSuite.scala`
+is the same thing as a test. It uses [ArchUnit](https://www.archunit.org/) over
+the compiled bytecode, so it sees what the code actually does, not what the
+imports claim. ArchUnit is a JVM library, so the suite runs on the JVM
+cross-build — which compiles the whole of `shared/` plus the JVM half of the
+platform seam, i.e. every production class apollo has.
+
+### The dependency table
+
+Packages are listed bottom-up; each may use itself plus the packages to its
+right, and **nothing else**. The table lives in `Apollo.layers` and is the
+single source of truth the layering rule is generated from.
+
+| Package | May depend on |
+|---|---|
+| `apollo.util` | — |
+| `apollo.core` | — |
+| `apollo.config` | util |
+| `apollo.http` | util |
+| `apollo.cron` | config, util |
+| `apollo.lsp` | config, util |
+| `apollo.session` | config, core, util |
+| `apollo.skills` | config, http, util |
+| `apollo.browser` | config, http, util |
+| `apollo.obs` | config, http, util |
+| `apollo.provider` | config, core, http, util |
+| `apollo.tools` | browser, config, core, cron, http, lsp, skills, util |
+| `apollo.mcp` | config, core, http, tools, util |
+| `apollo.agent` | config, core, http, obs, provider, session, skills, tools, util |
+| `apollo.gateway` | agent, config, core, cron, http, mcp, provider, session, skills, tools, util |
+| `apollo.acp` | agent, config, gateway, provider, util |
+| `apollo.cli` | everything below |
+| `apollo` (`Main`) | cli |
+
+Three consequences worth naming:
+
+- **The kernel is pure.** `apollo.util` and `apollo.core` depend on no other
+  apollo package *and on no Kyo effect* — no `Sync`, `Async`, `Abort`, `Fiber`,
+  `Console`. They are values and total functions, testable without running an
+  effect. `apollo.core`'s fields are all final, and it touches no mutable or
+  concurrent collection, so a `Message` is safe to share across fibers and to
+  serialize exactly as it sits in memory.
+- **HTTP is infrastructure, not provider code.** `Transport` and `HttpError`
+  live in `apollo.http` because ten packages POST over HTTP and only one of
+  them is the provider layer.
+- **There are no cycles.** Where a lower layer needs something from a higher
+  one, the abstraction is owned by the *consumer* and bound at the top:
+  `apollo.tools.ToolUi` (a tool asking the human — the CLI binds the terminal,
+  everything unattended binds `UnattendedToolUi`), `apollo.mcp.CodePrompt` (the
+  OAuth flow asking for a pasted redirect URL — the CLI binds its line editor),
+  `apollo.tools.DelegateRunner` and `VisionRunner` (a tool that needs a model
+  call, without importing the provider layer).
+
+### What else the suite pins down
+
+| Suite | Rule |
+|---|---|
+| `LayeringSuite` | the table above; no package cycles; every package is in the table; the kernel reaches nothing in apollo |
+| `PuritySuite` | kernel free of Kyo effects; `apollo.core` fields final; no mutable/concurrent collections in the domain; nothing throws a generic exception (failure is `Abort`/`Result`) |
+| `KyoStyleSuite` | no `scala.concurrent`; no `Thread.sleep` (use `Async.sleep`, so the fiber yields and stays interruptible) outside the shutdown hook; only `apollo.cli` and `apollo.acp` touch stdout — everything else goes through `kyo.Console`/`ObsLog`; only the composition root calls `System.exit`; no `java.util.logging`; no pre-JSR-310 date classes |
+| `SeamSuite` | the wire adapters are reachable only via `WireTransport.forMode`; built-in tool handlers only via `ToolRegistry`; chat connectors only from `Gateway`; the ports are interfaces |
+| `PortabilitySuite` | only `Platform*` classes touch JVM-only APIs (`java.security`, `java.sql`, JLine, reflection, …), and every JVM `Platform*` has a Native twin |
+| `ConventionsSuite` | test classes are named `*Suite` |
+
+The exemptions are few and each is commented where it is written:
+`McpClient.destroyNow` may block (a shutdown hook cannot run an effect),
+`apollo.acp` may write to stdout (its stdout *is* the JSON-RPC wire), and the
+`Platform*` trio may use JVM-only APIs (that is what they are for).
 
 ---
 

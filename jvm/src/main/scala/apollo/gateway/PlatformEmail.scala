@@ -8,6 +8,11 @@ import kyo.*
   * poll fiber). Protocol shaping is the shared pure `Email` helpers. */
 object PlatformEmail:
 
+  /** A tagged IMAP command that came back non-OK. Typed rather than a bare
+    * `RuntimeException` so the `catch` below can only ever be swallowing a
+    * protocol failure, never a bug. */
+  private final class ImapFailure(message: String) extends Exception(message)
+
   import java.net.Socket
   import javax.net.ssl.SSLSocketFactory
 
@@ -93,7 +98,7 @@ object PlatformEmail:
             while !done do
               val line = c.readLine()
               if line.trim.startsWith(s"$t ") then
-                if !Email.taggedOk(line, t) then throw new RuntimeException(s"IMAP '$cmd' -> $line")
+                if !Email.taggedOk(line, t) then throw new ImapFailure(s"IMAP '$cmd' -> $line")
                 done = true
               else lines += line
             lines.toList

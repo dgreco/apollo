@@ -1,7 +1,7 @@
 package apollo.skills
 
 import apollo.config.{ApolloConfig, ApolloPaths, Fs}
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -105,7 +105,7 @@ object SkillsHub:
     config.skillsHubCatalogUrl match
       case Absent => Result.fail("no catalog configured (set skills.hub_catalog_url)")
       case Present(url) =>
-        Abort.run[ProviderError](Transport.getJson(url, Nil)).map {
+        Abort.run[HttpError](Transport.getJson(url, Nil)).map {
           case Result.Success(body) =>
             Jx.parse(body) match
               case Result.Success(j) => Result.succeed(searchCatalog(parseCatalog(j), query))

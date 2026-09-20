@@ -3,7 +3,9 @@ package apollo.cli
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
 import apollo.config.*
 import apollo.core.{Message, Content, Role}
+import apollo.http.HttpError
 import apollo.util.Jx.*
+import apollo.util.Style
 import kyo.Structure.Value
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore}
@@ -19,11 +21,9 @@ import kyo.*
   */
 object Cli:
 
-  val version = "0.1.0"
-
   def run(argv: List[String]): Unit < (Sync & Async & Scope) =
     val args = CliArgs.parse(argv)
-    if args.version then Console.printLine(s"apollo $version")
+    if args.version then Console.printLine(s"apollo ${BuildInfo.version}")
     else if args.help then Console.printLine(helpText)
     else
       // Home resolution with the upstream profile semantics: -p flag >
@@ -87,7 +87,7 @@ object Cli:
       case "acp"      => apollo.acp.AcpServer.run(config, paths)
       case "memory"   => Commands.memory(paths)
       case "logs"     => Console.printLine(s"session transcripts: ${paths.home.resolve("scala-state").resolve("sessions")}")
-      case "version"  => Console.printLine(s"apollo $version")
+      case "version"  => Console.printLine(s"apollo ${BuildInfo.version}")
       case "help" | _ => Console.printLine(helpText)
 
   // --- chat (REPL + one-shot) --------------------------------------------
@@ -159,7 +159,7 @@ object Cli:
       // MCP servers spawn before toolset selection so their tools reach this
       // session. An explicit -t list acts as the upstream server allowlist.
       _             <- apollo.mcp.McpManager.start(config, paths, cwd,
-                         args.toolsets.map(_.toList), version)
+                         args.toolsets.map(_.toList), BuildInfo.version)
       // Server→client MCP requests: sampling runs a model call; elicitation asks
       // the user (declines when non-interactive).
       _              = apollo.mcp.McpManager.setSamplingHandler(mcpSamplingHandler(runtime))
@@ -297,7 +297,7 @@ object Cli:
       WireTransport.forMode(rt.apiMode) match
         case Result.Success(transport) =>
           val req = TurnRequest(rt, apollo.mcp.McpSampling.systemPrompt(params), msgs, Nil)
-          Abort.run[ProviderError](transport.streamTurn(req)(_ => ())).map {
+          Abort.run[HttpError](transport.streamTurn(req)(_ => ())).map {
             case Result.Success(resp) =>
               val text = resp.message.content.collect { case Content.Text(t) => t }.mkString
               Result.succeed(apollo.mcp.McpSampling.result(text, rt.model))
@@ -341,7 +341,7 @@ object Cli:
     }
 
   val helpText: String =
-    s"""apollo $version — a Scala + Kyo clone of the upstream agent harness
+    s"""apollo ${BuildInfo.version} — a Scala + Kyo clone of the upstream agent harness
        |
        |Usage: apollo [flags] [command]
        |
@@ -402,9 +402,3 @@ final class EditorToolUi(editor: LineEditor) extends ToolUi:
           case Absent => ""
         })
     }.map(_.toList)
-
-/** ToolUi for unattended contexts: approvals deny, clarify returns blanks. */
-object UnattendedToolUi extends ToolUi:
-  def requestApproval(prompt: String): ApprovalDecision < (Sync & Async) = ApprovalDecision.Deny
-  def clarify(questions: List[ClarifyQuestion]): List[String] < (Sync & Async) =
-    questions.map(_ => "")

@@ -1,6 +1,6 @@
 package apollo.tools
 
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -46,7 +46,7 @@ object WebTools:
         val limit = (args / "limit").asLong.map(_.toInt).getOrElse(5).max(1).min(20)
         val url =
           s"https://api.search.brave.com/res/v1/web/search?q=${urlEncode(query)}&count=$limit"
-        Abort.run[ProviderError](Transport.getJson(url, List("x-subscription-token" -> key))).map {
+        Abort.run[HttpError](Transport.getJson(url, List("x-subscription-token" -> key))).map {
           case Result.Success(body) =>
             Jx.parse(body) match
               case Result.Success(json) =>
@@ -75,7 +75,7 @@ object WebTools:
         if urls.isEmpty then ToolOutcome.Error("urls must contain at least one URL")
         else
           Kyo.foreach(urls) { url =>
-            Abort.run[ProviderError](Transport.getJson(url, List("accept" -> "text/html,*/*"))).map {
+            Abort.run[HttpError](Transport.getJson(url, List("accept" -> "text/html,*/*"))).map {
               case Result.Success(body) =>
                 val text = htmlToText(body).take(charLimit)
                 s"=== $url ===\n$text"

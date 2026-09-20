@@ -1,9 +1,10 @@
-package apollo.cron
+package apollo.gateway
 
 import apollo.agent.{Agent, SystemPrompt, TurnCallbacks}
-import apollo.cli.UnattendedToolUi
 import apollo.config.{ApolloConfig, ApolloPaths}
 import apollo.core.Message
+import apollo.cron.{CronJob, CronStore}
+import apollo.http.{HttpError, Transport}
 import apollo.provider.*
 import apollo.session.{SessionMeta, SessionStore}
 import apollo.skills.SkillStore
@@ -18,7 +19,7 @@ import kyo.*
   * `deliver` is `telegram:<chat_id>` and a bot token is configured, via the
   * Telegram Bot API.
   */
-object Scheduler:
+object CronScheduler:
 
   private val tickSeconds = 60
 
@@ -120,7 +121,7 @@ object Scheduler:
                 "chat_id" -> apollo.util.Jx.str(chatId),
                 "text"    -> apollo.util.Jx.str(s"⏰ ${job.name}\n\n${output.take(4000)}")
               ))
-              Abort.run[ProviderError](
+              Abort.run[HttpError](
                 Transport.postJson(s"https://api.telegram.org/bot$token/sendMessage", Nil, body)
               ).unit
             case Absent =>
@@ -128,17 +129,17 @@ object Scheduler:
         case s"discord:$channelId" =>
           config.env.get("DISCORD_BOT_TOKEN") match
             case Present(token) =>
-              apollo.gateway.Discord.send(token, channelId,
+              Discord.send(token, channelId,
                 s"⏰ ${job.name}\n\n${output.take(1900)}", config.env.get)
             case Absent =>
               Console.printLine(s"cron ${job.id}: discord delivery configured but no DISCORD_BOT_TOKEN")
         case s"slack:$channelId" =>
           config.env.get("SLACK_BOT_TOKEN") match
             case Present(token) =>
-              apollo.gateway.Slack.sendChunked(token, channelId,
+              Slack.sendChunked(token, channelId,
                 s"⏰ ${job.name}\n\n${output.take(4000)}", config.env.get)
             case Absent =>
               Console.printLine(s"cron ${job.id}: slack delivery configured but no SLACK_BOT_TOKEN")
         case _ =>
           Console.printLine(s"cron ${job.id} result:\n${output.take(2000)}")
-end Scheduler
+end CronScheduler

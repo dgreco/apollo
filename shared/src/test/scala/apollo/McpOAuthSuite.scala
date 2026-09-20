@@ -1,8 +1,8 @@
 package apollo.mcp
 
 import apollo.config.ApolloPaths
-import apollo.util.{Crypto, Jx}
 import apollo.util.Jx.*
+import apollo.util.Jx
 import kyo.*
 
 /** Unit coverage for the OAuth pieces plus a full-stack login E2E against an
@@ -161,16 +161,10 @@ class McpOAuthSuite extends munit.FunSuite:
             oauthClientId = Absent, oauthClientSecret = Absent, oauthScopes = List("mcp:read"),
             oauthRedirectPort = 0)
 
-          // A scripted "editor": its readLine blocks so the loopback branch
-          // always wins the race; a background fiber plays the browser by
-          // GETting the fixed redirect URL with the issued code.
-          val editor = new apollo.cli.LineEditor:
-            def readLine(prompt: String) = Async.sleep(30.seconds).andThen(Absent)
-            def readSecret(prompt: String) = Absent
-            def addHistory(line: String) = ()
-            def onInterrupt(handler: () => Unit) = false
-            def isInteractive = true
-            def printAbove(text: String) = Sync.defer(())
+          // A scripted paste prompt: it blocks so the loopback branch always
+          // wins the race; a background fiber plays the browser by GETting the
+          // fixed redirect URL with the issued code.
+          val paste: apollo.mcp.CodePrompt = _ => Async.sleep(30.seconds).andThen(Absent)
 
           val fixedCfg = cfg.copy(oauthRedirectPort = 0)
           // Play the browser: parse the real state from the auth URL login
@@ -182,11 +176,11 @@ class McpOAuthSuite extends munit.FunSuite:
             val cbUrl = s"$redirect?code=$issuedCode&state=$state"
             Fiber.initUnscoped(
               Async.sleep(200.millis).andThen(
-                Abort.run[apollo.provider.ProviderError](
-                  apollo.provider.Transport.getJson(cbUrl, Nil, 3.seconds)).unit)
+                Abort.run[apollo.http.HttpError](
+                  apollo.http.Transport.getJson(cbUrl, Nil, 3.seconds)).unit)
             ).unit
           }
-          McpOAuth.login(fixedCfg, store, editor, 30.seconds).map {
+          McpOAuth.login(fixedCfg, store, paste, 30.seconds).map {
               case Result.Success(scope) =>
                 assertEquals(scope, "mcp:read")
                 // DCR happened; PKCE verifier reached the token endpoint.

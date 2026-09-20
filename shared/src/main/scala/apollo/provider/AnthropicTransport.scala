@@ -1,8 +1,9 @@
 package apollo.provider
 
 import apollo.core.*
-import apollo.util.{Jx, Sse}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx.*
+import apollo.util.{Jx, Sse}
 import kyo.*
 import kyo.Structure.Value
 
@@ -18,7 +19,7 @@ object AnthropicTransport extends WireTransport:
 
   def streamTurn(request: TurnRequest)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError]) =
+  ): TurnResponse < (Sync & Async & Abort[HttpError]) =
     val rt  = request.runtime
     val url = s"${rt.baseUrl.stripSuffix("/v1")}/v1/messages"
     if rt.streaming then
@@ -29,7 +30,7 @@ object AnthropicTransport extends WireTransport:
       Transport.postJson(url, headers(rt), Jx.render(buildBody(request, stream = false))).map { text =>
         Jx.parse(text) match
           case Result.Success(json) => Abort.get(parseComplete(json))
-          case _                    => Abort.fail(ProviderError.Protocol("unparseable Anthropic response"))
+          case _                    => Abort.fail(HttpError.Protocol("unparseable Anthropic response"))
       }
   end streamTurn
 
@@ -211,7 +212,7 @@ object AnthropicTransport extends WireTransport:
     private var blocks      = Vector.empty[Block]
     private var stopReason  = ""
     private var usage       = Usage.zero
-    private var streamError = Maybe.empty[ProviderError]
+    private var streamError = Maybe.empty[HttpError]
 
     def onSse(event: Sse.Event): Unit < (Sync & Async) =
       val data = event.data.trim
@@ -279,12 +280,12 @@ object AnthropicTransport extends WireTransport:
           ()
         case "error" =>
           val msg = (json / "error" / "message").asStr.getOrElse(Jx.render(json))
-          streamError = Present(ProviderError.Protocol(s"in-stream provider error: $msg"))
+          streamError = Present(HttpError.Protocol(s"in-stream provider error: $msg"))
           ()
         case _ => () // ping / message_stop / content_block_stop
     end process
 
-    def finish(): Result[ProviderError, TurnResponse] =
+    def finish(): Result[HttpError, TurnResponse] =
       streamError match
         case Present(err) => Result.fail(err)
         case Absent =>
@@ -301,10 +302,10 @@ object AnthropicTransport extends WireTransport:
 
   // --- non-streaming ------------------------------------------------------
 
-  private def parseComplete(json: Value): Result[ProviderError, TurnResponse] =
+  private def parseComplete(json: Value): Result[HttpError, TurnResponse] =
     (json / "content").asArr match
       case Absent =>
-        Result.fail(ProviderError.Protocol(s"Anthropic response has no content: ${Jx.render(json).take(500)}"))
+        Result.fail(HttpError.Protocol(s"Anthropic response has no content: ${Jx.render(json).take(500)}"))
       case Present(items) =>
         val content = items.toList.flatMap { item =>
           (item / "type").asStr.getOrElse("") match

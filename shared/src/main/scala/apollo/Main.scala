@@ -27,7 +27,6 @@ object Main extends KyoApp:
     * class-init, which may precede this object's body on some platforms).
     */
   private def quietLog: Log =
-    import AllowUnsafe.embrace.danger
     Log(Log.Unsafe.ConsoleLogger("kyo.logs", Log.Level.error))
 
   run {

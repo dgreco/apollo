@@ -1,6 +1,7 @@
 package apollo.provider
 
 import apollo.core.*
+import apollo.http.HttpError
 import kyo.*
 
 /** One conversation turn as handed to a wire transport. */
@@ -22,10 +23,10 @@ final case class TurnRequest(
 trait WireTransport:
   def streamTurn(request: TurnRequest)(
       onEvent: StreamEvent => Unit < (Sync & Async)
-  ): TurnResponse < (Sync & Async & Abort[ProviderError])
+  ): TurnResponse < (Sync & Async & Abort[HttpError])
 
 object WireTransport:
-  def forMode(mode: ApiMode): Result[ProviderError, WireTransport] =
+  def forMode(mode: ApiMode): Result[HttpError, WireTransport] =
     mode match
       case ApiMode.ChatCompletions   => Result.succeed(ChatCompletionsTransport)
       case ApiMode.AnthropicMessages => Result.succeed(AnthropicTransport)

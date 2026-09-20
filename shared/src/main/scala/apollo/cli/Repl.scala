@@ -1,25 +1,17 @@
 package apollo.cli
 
 import apollo.agent.{Agent, AutoReview, SystemPrompt, TurnCallbacks, TurnResult}
-import apollo.core.*
+import apollo.config.BuildInfo
 import apollo.config.Fs
+import apollo.core.*
 import apollo.cron.{CronStore, CronJob, Schedule}
-import apollo.util.{Crypto, Jx}
 import apollo.mcp.McpManager
 import apollo.provider.{Profiles, ResolvedRuntime}
 import apollo.session.{SessionStore, SessionMeta, HandoffStore}
-import apollo.tools.{ToolContext, Toolsets, ToolRegistry}
+import apollo.tools.{ToolContext, ToolRegistry}
+import apollo.util.Style
+import apollo.util.{Crypto, Jx}
 import kyo.*
-
-/** ANSI styling helpers (degrade to plain text when NO_COLOR is set). */
-object Style:
-  private def colorEnabled = !sys.env.contains("NO_COLOR")
-  private def wrap(code: String, s: String) = if colorEnabled then s"\u001b[${code}m$s\u001b[0m" else s
-  def dim(s: String)    = wrap("2", s)
-  def bold(s: String)   = wrap("1", s)
-  def gold(s: String)   = wrap("38;5;178", s)
-  def red(s: String)    = wrap("31", s)
-  def green(s: String)  = wrap("32", s)
 
 /** The interactive chat REPL: banner, prompt loop, slash commands, streamed
   * rendering, tool progress lines, Ctrl-C interrupt-and-continue.
@@ -68,7 +60,7 @@ final class Repl(
       val allTools   = toolGroups
       val shownTools = allTools.take(12)
       Banner.render(
-        Cli.version, runtime.displayName, runtime.model, runtime.providerSlug,
+        BuildInfo.version, runtime.displayName, runtime.model, runtime.providerSlug,
         toolCtx.cwd.toString, sess,
         shownTools, skillGroups,
         toolCount = toolNames.length, skillCount = sk.length,
@@ -371,7 +363,7 @@ final class Repl(
       case "help" =>
         Console.printLine(helpText).andThen(true)
       case "version" | "v" =>
-        Console.printLine(s"apollo ${Cli.version} · ${runtime.displayName} ${runtime.model}").andThen(true)
+        Console.printLine(s"apollo ${BuildInfo.version} · ${runtime.displayName} ${runtime.model}").andThen(true)
       case "model" =>
         if arg.isEmpty then
           Console.printLine(s"model: ${runtime.model} (provider: ${runtime.providerSlug})").andThen(true)

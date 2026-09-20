@@ -1,6 +1,6 @@
 package apollo.agent
 
-import kyo.{Absent, Present}
+import kyo.Absent
 
 class NudgesSuite extends munit.FunSuite:
 

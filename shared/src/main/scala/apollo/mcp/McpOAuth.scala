@@ -1,12 +1,20 @@
 package apollo.mcp
 
-import apollo.cli.LineEditor
-import apollo.config.ApolloPaths
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.{Crypto, Jx}
 import apollo.util.Jx.*
 import kyo.*
 import kyo.Structure.Value
+
+/** How the OAuth flow asks the operator to paste the redirect URL when the
+  * loopback callback can't be reached (remote shell, locked-down browser).
+  *
+  * Owned by this package rather than taken as a terminal line-editor: the flow
+  * needs exactly one capability — read one line, `Absent` on EOF — and
+  * inverting it keeps the MCP subsystem below the CLI that binds it.
+  */
+trait CodePrompt:
+  def readLine(prompt: String): Maybe[String] < (Sync & Async)
 
 /** OAuth 2.1 + PKCE for remote (streamable-HTTP) MCP servers. Hermes
   * delegates the protocol wire to the Python MCP SDK; here it is implemented
@@ -78,7 +86,7 @@ object McpOAuth:
     urls match
       case Nil => Absent
       case url :: rest =>
-        Abort.run[ProviderError](Transport.getJson(url, Nil, timeout)).map {
+        Abort.run[HttpError](Transport.getJson(url, Nil, timeout)).map {
           case Result.Success(body) =>
             Jx.parse(body) match
               case Result.Success(v) if v.asObj.nonEmpty => Present(v)
@@ -138,7 +146,7 @@ object McpOAuth:
       "application_type"           -> Present(Jx.str("native")),
       "scope"                      -> (if cfg.oauthScopes.nonEmpty then Present(Jx.str(cfg.oauthScopes.mkString(" "))) else Absent)
     ))
-    Abort.run[ProviderError](Transport.postJson(regEndpoint, Nil, body, timeout)).map {
+    Abort.run[HttpError](Transport.postJson(regEndpoint, Nil, body, timeout)).map {
       case Result.Success(text) =>
         Jx.parse(text) match
           case Result.Success(v) =>
@@ -227,7 +235,7 @@ object McpOAuth:
   private def tokenRequest(
       tokenEndpoint: String, body: String, timeout: Duration
   ): Result[String, OAuthTokens] < (Sync & Async) =
-    Abort.run[ProviderError](Transport.postJson(tokenEndpoint, formHeader, body, timeout)).map {
+    Abort.run[HttpError](Transport.postJson(tokenEndpoint, formHeader, body, timeout)).map {
       case Result.Success(text) =>
         Jx.parse(text) match
           case Result.Success(v) => parseTokens(v)
@@ -342,7 +350,7 @@ object McpOAuth:
   def login(
       cfg: McpServerConfig,
       store: McpOAuthStore,
-      editor: LineEditor,
+      prompt: CodePrompt,
       timeout: Duration
   ): Result[String, String] < (Sync & Async) =
     cfg.url match
@@ -368,7 +376,7 @@ object McpOAuth:
                         case Present(hook) => hook(authUrl)
                         case Absent        => announce(authUrl)
                       present.andThen {
-                        awaitCode(server, editor, state).map {
+                        awaitCode(server, prompt, state).map {
                           case Result.Failure(err) => server.stop.andThen(Result.fail(err))
                           case Result.Success(code) =>
                             server.stop.andThen {
@@ -392,27 +400,22 @@ object McpOAuth:
     */
   private def announce(url: String): Unit < (Sync & Async) =
     Console.printLine(s"\nAuthorize apollo in your browser:\n\n  $url\n").andThen {
+      val os = java.lang.System.getProperty("os.name", "").toLowerCase
       val opener =
-        val os = java.lang.System.getProperty("os.name", "").toLowerCase
-        if os.contains("mac") then Some("open")
-        else if os.contains("win") then Some("cmd")
-        else Some("xdg-open")
-      opener match
-        case Some("cmd") =>
-          Abort.run[Any](Abort.catching[Throwable](Command("cmd", "/c", "start", url).spawnUnscoped)).unit
-        case Some(bin) =>
-          Abort.run[Any](Abort.catching[Throwable](Command(bin, url).spawnUnscoped)).unit
-        case None => ()
+        if os.contains("mac") then Command("open", url)
+        else if os.contains("win") then Command("cmd", "/c", "start", url)
+        else Command("xdg-open", url)
+      Abort.run[Any](Abort.catching[Throwable](opener.spawnUnscoped)).unit
     }
 
   /** Races the loopback callback against a stdin paste; validates `state`. */
   private def awaitCode(
-      server: CallbackServer, editor: LineEditor, expectedState: String
+      server: CallbackServer, prompt: CodePrompt, expectedState: String
   ): Result[String, String] < (Sync & Async) =
     val fromServer: Result[String, String] < (Sync & Async) =
       server.await.map(validate(_, expectedState))
     val fromPaste: Result[String, String] < (Sync & Async) =
-      editor.readLine(
+      prompt.readLine(
         "…or paste the full redirect URL here (or the ?code=… part), or 'skip': "
       ).map {
         case Present(line) if line.trim.toLowerCase == "skip" || line.trim.isEmpty =>

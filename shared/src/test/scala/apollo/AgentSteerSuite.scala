@@ -1,12 +1,11 @@
 package apollo.agent
 
-import apollo.config.{ApolloConfig, ApolloPaths, EnvChain, Yaml}
+import apollo.config.{ApolloConfig, ApolloPaths, EnvChain}
 import apollo.core.*
 import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.session.SessionStore
 import apollo.tools.*
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** End-to-end: a real `Agent` against a mock chat-completions server. Turn 1
@@ -57,7 +56,7 @@ class AgentSteerSuite extends munit.FunSuite:
             val ctx = ToolContext(
               config = config, paths = paths, cwd = home, platform = "cli", sessionId = "steer-test",
               approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-              ui = apollo.cli.UnattendedToolUi, todo = todo,
+              ui = apollo.tools.UnattendedToolUi, todo = todo,
               skills = new apollo.skills.SkillStore(config, paths))
             val flag  = new java.util.concurrent.atomic.AtomicBoolean(false)
             val agent = new Agent(runtime, ctx, store, "steer-test", Present(5), flag)

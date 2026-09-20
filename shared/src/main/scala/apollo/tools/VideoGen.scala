@@ -1,7 +1,7 @@
 package apollo.tools
 
 import apollo.config.Fs
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -69,7 +69,7 @@ object VideoGen:
         val seconds = (args / "seconds").asLong.map(_.toInt)
         val size    = (args / "size").asStr
         val body    = buildBody(ctx.config.videoModel, prompt, seconds, size)
-        Abort.run[ProviderError](Transport.postJson(s"$base/videos", auth, body)).map { submitted =>
+        Abort.run[HttpError](Transport.postJson(s"$base/videos", auth, body)).map { submitted =>
           val out: ToolOutcome < (Sync & Async) = submitted match
             case Result.Failure(e) => ToolOutcome.Error(s"video submit failed: ${e.getMessage}")
             case Result.Panic(e)   => ToolOutcome.Error(s"video submit failed: ${String.valueOf(e.getMessage)}")
@@ -88,7 +88,7 @@ object VideoGen:
   ): ToolOutcome < (Sync & Async) =
     if remaining <= 0 then ToolOutcome.Error(s"video generation timed out (id $id)")
     else
-      Abort.run[ProviderError](Transport.getJson(s"$base/videos/$id", auth, 30.seconds)).map { polled =>
+      Abort.run[HttpError](Transport.getJson(s"$base/videos/$id", auth, 30.seconds)).map { polled =>
         val out: ToolOutcome < (Sync & Async) = polled match
           case Result.Failure(e) => ToolOutcome.Error(s"video poll failed: ${e.getMessage}")
           case Result.Panic(e)   => ToolOutcome.Error(s"video poll failed: ${String.valueOf(e.getMessage)}")
@@ -105,7 +105,7 @@ object VideoGen:
       }
 
   private def download(url: String, auth: List[(String, String)], args: Value, ctx: ToolContext): ToolOutcome < (Sync & Async) =
-    Abort.run[ProviderError](Transport.getBytes(url, auth, 5.minutes)).map {
+    Abort.run[HttpError](Transport.getBytes(url, auth, 5.minutes)).map {
       case Result.Success(bytes) =>
         val name = (args / "filename").asStr.getOrElse(s"video-${java.util.UUID.randomUUID.toString.take(8)}.mp4")
         val path = ctx.cwd.resolve(name)

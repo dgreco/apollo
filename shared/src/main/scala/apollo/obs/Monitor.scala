@@ -1,7 +1,7 @@
 package apollo.obs
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import kyo.*
 
 /** Content-free observability export (mirrors Hermes's monitoring plane):
@@ -27,7 +27,7 @@ object Monitor:
   private def post(config: ApolloConfig, path: String, body: String): Unit < (Sync & Async) =
     val url     = s"${config.otlpEndpoint}$path"
     val headers = ("content-type" -> "application/json") :: config.otlpHeaders.toList
-    Abort.run[ProviderError](Transport.postJson(url, headers, body, 10.seconds)).unit
+    Abort.run[HttpError](Transport.postJson(url, headers, body, 10.seconds)).unit
 
   /** Export everything collected for a turn — traces (the span tree), the
     * cumulative metric snapshot, and any buffered log records — POSTing each
@@ -86,6 +86,6 @@ object Monitor:
       }.map { body =>
         val url     = s"${config.otlpEndpoint}/v1/traces"
         val headers = ("content-type" -> "application/json") :: config.otlpHeaders.toList
-        Abort.run[ProviderError](Transport.postJson(url, headers, body, 10.seconds)).unit
+        Abort.run[HttpError](Transport.postJson(url, headers, body, 10.seconds)).unit
       }
 end Monitor

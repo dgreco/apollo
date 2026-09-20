@@ -81,6 +81,5 @@ object ObsLog:
   def withLogger[A, S](lvl: Log.Level)(body: A < S)(using Frame): A < S =
     if lvl == Log.Level.silent then body
     else
-      import AllowUnsafe.embrace.danger
       Log.let(Log(Log.Unsafe.ConsoleLogger("apollo", lvl)))(body)
 end ObsLog

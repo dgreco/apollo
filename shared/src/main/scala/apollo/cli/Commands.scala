@@ -1,12 +1,14 @@
 package apollo.cli
 
-import apollo.config.{Fs, ApolloConfig, ApolloPaths, Secrets}
+import apollo.config.BuildInfo
 import apollo.config.Yaml.*
+import apollo.config.{Fs, ApolloConfig, ApolloPaths, Secrets}
 import apollo.cron.CronStore
 import apollo.provider.{CopilotAuth, Profiles, QwenAuth, ResolveError, Runtime, RuntimeOverrides}
 import apollo.session.SessionStore
 import apollo.skills.SkillStore
 import apollo.tools.Toolsets
+import apollo.util.Style
 import kyo.*
 
 /** Non-chat subcommands: model / config / sessions / skills / cron / status
@@ -102,8 +104,8 @@ object Commands:
       case "run-scheduler" :: _ =>
         Console.printLine("cron scheduler tick loop starting (Ctrl-C to stop)")
           .andThen(apollo.mcp.McpManager.start(config, paths,
-            java.nio.file.Paths.get(".").toAbsolutePath.normalize, kyo.Absent, Cli.version))
-          .andThen(apollo.cron.Scheduler.runLoop(config, paths))
+            java.nio.file.Paths.get(".").toAbsolutePath.normalize, kyo.Absent, BuildInfo.version))
+          .andThen(apollo.gateway.CronScheduler.runLoop(config, paths))
       case _ =>
         new CronStore(paths).load.map { jobs =>
           if jobs.isEmpty then Console.printLine("no scheduled jobs (create them in chat via cronjob_manage)")
@@ -154,7 +156,7 @@ object Commands:
             Console.printLine(s"no enabled MCP server named '$name' in mcp_servers (apollo mcp list)")
           case Some(cfg) =>
             Console.printLine(s"probing '${cfg.name}' (${cfg.command.getOrElse(cfg.url.getOrElse("?"))})...")
-              .andThen(apollo.mcp.McpManager.probe(cfg, config, paths, Cli.version))
+              .andThen(apollo.mcp.McpManager.probe(cfg, config, paths, BuildInfo.version))
               .map {
                 case kyo.Result.Success(tools) =>
                   val lines = tools.map((n, d) => s"  $n${if d.isEmpty then "" else s" — ${d.take(80)}"}")
@@ -176,7 +178,7 @@ object Commands:
               // Generous budget: the discovery/exchange requests plus the
               // interactive browser wait (upstream's callback timeout is 300s).
               Console.printLine(s"authorizing '$name' (${cfg.url.getOrElse("?")})…")
-                .andThen(apollo.mcp.McpOAuth.login(cfg, store, editor, 300.seconds))
+                .andThen(apollo.mcp.McpOAuth.login(cfg, store, editor.readLine(_), 300.seconds))
                 .map {
                   case kyo.Result.Success(scope) =>
                     Console.printLine(Style.gold(s"✓ authorized '$name' (scope: $scope). " +

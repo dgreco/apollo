@@ -3,7 +3,6 @@ package apollo.tools
 import apollo.config.{ApolloConfig, ApolloPaths}
 import apollo.core.ToolSpec
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 import kyo.Structure.Value
 
@@ -61,6 +60,15 @@ trait ToolUi:
   def requestApproval(prompt: String): ApprovalDecision < (Sync & Async)
   /** Asks the clarify questions; returns one answer per question. */
   def clarify(questions: List[ClarifyQuestion]): List[String] < (Sync & Async)
+
+/** The null object for unattended surfaces (gateway, cron, delegated child
+  * agents, one-shot runs): approvals deny, clarify answers blank. Lives beside
+  * the port so nothing unattended has to reach into the CLI for it.
+  */
+object UnattendedToolUi extends ToolUi:
+  def requestApproval(prompt: String): ApprovalDecision < (Sync & Async) = ApprovalDecision.Deny
+  def clarify(questions: List[ClarifyQuestion]): List[String] < (Sync & Async) =
+    questions.map(_ => "")
 
 enum ApprovalDecision:
   case Once, Session, Always, Deny

@@ -5,7 +5,6 @@ import apollo.tools.{ApprovalDecision, ToolEntry, ToolOutcome, ToolRegistry}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
-import kyo.Structure.Value
 
 /** MCP server lifecycle and registration: spawns the stdio servers from
   * `mcp_servers:` concurrently at startup, lists their tools, and registers

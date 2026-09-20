@@ -20,7 +20,7 @@ class VoiceToolsSuite extends munit.FunSuite:
     AtomicRef.init(List.empty[TodoItem]).map { todo =>
       ToolContext(config = config, paths = paths, cwd = home, platform = "cli", sessionId = "v",
         approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
-        ui = apollo.cli.UnattendedToolUi, todo = todo,
+        ui = apollo.tools.UnattendedToolUi, todo = todo,
         skills = new apollo.skills.SkillStore(config, paths))
     }
 

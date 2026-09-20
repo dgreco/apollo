@@ -1,10 +1,11 @@
 package apollo.agent
 
 import apollo.core.*
-import apollo.provider.*
-import apollo.session.{SessionMeta, SessionStore}
-import apollo.tools.{ToolContext, ToolRegistry}
+import apollo.http.HttpError
 import apollo.obs.{Metrics, Monitor, ObsLog, Otlp, TraceContext}
+import apollo.provider.*
+import apollo.session.SessionStore
+import apollo.tools.{ToolContext, ToolRegistry}
 import kyo.*
 
 /** UI-facing callbacks for one turn. All are fire-and-forget; a callback
@@ -27,7 +28,7 @@ final case class TurnResult(
 )
 
 enum AgentError:
-  case Provider(error: ProviderError)
+  case Provider(error: HttpError)
   case Interrupted
 
 /** The conversation engine: user message → model call → tool rounds → final
@@ -305,7 +306,7 @@ final class Agent(
     resolveFallbacks.map { fallbacks =>
       def attemptChain(chain: List[ResolvedRuntime]): Result[AgentError, TurnResponse] < (Sync & Async) =
         chain match
-          case Nil => Result.fail(AgentError.Provider(ProviderError.Network("all providers failed")))
+          case Nil => Result.fail(AgentError.Provider(HttpError.Network("all providers failed")))
           case rt :: rest =>
             callWithRetries(request, callbacks, attempt = 0, rt).map {
               case Result.Failure(AgentError.Provider(err)) if rest.nonEmpty && !interruptFlag.get =>
@@ -373,7 +374,7 @@ final class Agent(
     val transport = WireTransport.forMode(rt.apiMode) match
       case Result.Success(t) => t
       case Result.Failure(e) => return Result.fail(AgentError.Provider(e))
-      case _                 => return Result.fail(AgentError.Provider(ProviderError.Protocol("no transport")))
+      case _                 => return Result.fail(AgentError.Provider(HttpError.Protocol("no transport")))
 
     interruptible(transport.streamTurn(request.copy(runtime = rt))(events)).map {
       case Result.Success(resp) => Result.succeed(resp)
@@ -392,7 +393,7 @@ final class Agent(
     * instead of hanging.
     */
   private def interruptible(
-      call: TurnResponse < (Sync & Async & Abort[ProviderError])
+      call: TurnResponse < (Sync & Async & Abort[HttpError])
   ): Result[AgentError, TurnResponse] < (Sync & Async) =
     def watcher: Result[AgentError, TurnResponse] < (Sync & Async) =
       Async.sleep(200.millis).andThen {
@@ -400,10 +401,10 @@ final class Agent(
         else watcher
       }
     val main: Result[AgentError, TurnResponse] < (Sync & Async) =
-      Abort.run[ProviderError](call).map {
+      Abort.run[HttpError](call).map {
         case Result.Success(r) => Result.succeed(r)
         case Result.Failure(e) => Result.fail(AgentError.Provider(e))
-        case Result.Panic(e)   => Result.fail(AgentError.Provider(ProviderError.Network(String.valueOf(e.getMessage))))
+        case Result.Panic(e)   => Result.fail(AgentError.Provider(HttpError.Network(String.valueOf(e.getMessage))))
       }
     Async.raceFirst(main, watcher)
 

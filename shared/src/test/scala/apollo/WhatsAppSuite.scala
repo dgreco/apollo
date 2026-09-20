@@ -3,7 +3,6 @@ package apollo.gateway
 import apollo.config.{ApolloConfig, ApolloPaths, EnvChain}
 import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** WhatsApp Cloud connector: pure parse/verify/body units + an E2E where a

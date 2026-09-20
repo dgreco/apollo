@@ -1,7 +1,7 @@
 package apollo.gateway
 
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -130,7 +130,7 @@ object Teams:
       case Result.Panic(e)   => Console.printLine(s"teams: auth failed: ${String.valueOf(e.getMessage)}")
       case Result.Success(tok) =>
         val url = s"${a.serviceUrl.stripSuffix("/")}/v3/conversations/${a.conversationId}/activities/${a.activityId}"
-        Abort.run[ProviderError](Transport.postJson(url, List("authorization" -> s"Bearer $tok"), replyBody(text), 30.seconds)).map {
+        Abort.run[HttpError](Transport.postJson(url, List("authorization" -> s"Bearer $tok"), replyBody(text), 30.seconds)).map {
           case Result.Success(_) => ()
           case Result.Failure(e) => Console.printLine(s"teams: send failed: ${e.getMessage.take(200)}")
           case Result.Panic(e)   => Console.printLine(s"teams: send failed: ${String.valueOf(e.getMessage)}")
@@ -155,7 +155,7 @@ object Teams:
     if appId.isEmpty || pass.isEmpty then Result.fail("TEAMS_APP_ID / TEAMS_APP_PASSWORD not set")
     else
       val headers = List("content-type" -> "application/x-www-form-urlencoded")
-      Abort.run[ProviderError](Transport.postJson(url, headers, tokenForm(appId, pass), 30.seconds)).map {
+      Abort.run[HttpError](Transport.postJson(url, headers, tokenForm(appId, pass), 30.seconds)).map {
         case Result.Success(body) =>
           parseToken(Jx.parse(body).getOrElse(Jx.obj()), now) match
             case Result.Success((t, exp)) => token.set(Present((t, exp))); Result.succeed(t)

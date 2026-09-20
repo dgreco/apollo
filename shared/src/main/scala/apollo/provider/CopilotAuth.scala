@@ -1,6 +1,7 @@
 package apollo.provider
 
 import apollo.config.{ApolloPaths, Fs}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -86,7 +87,7 @@ object CopilotAuth:
   /** Exchange a GitHub token for a short-lived Copilot bearer. */
   def exchange(githubToken: String): Result[String, Token] < (Sync & Async) =
     val hdrs = ("authorization" -> s"token $githubToken") :: ("accept" -> "application/json") :: headers.toList
-    Abort.run[ProviderError](Transport.getJson(tokenExchangeUrl, hdrs)).map {
+    Abort.run[HttpError](Transport.getJson(tokenExchangeUrl, hdrs)).map {
       case Result.Success(body) =>
         Jx.parse(body) match
           case Result.Success(j) => parseExchange(j)
@@ -97,7 +98,7 @@ object CopilotAuth:
 
   def deviceStart(): Result[String, DeviceCode] < (Sync & Async) =
     val body = Jx.render(Jx.obj("client_id" -> Jx.str(clientId), "scope" -> Jx.str(scope)))
-    Abort.run[ProviderError](Transport.postJson(deviceCodeUrl, List("accept" -> "application/json"), body)).map {
+    Abort.run[HttpError](Transport.postJson(deviceCodeUrl, List("accept" -> "application/json"), body)).map {
       case Result.Success(b) =>
         Jx.parse(b) match
           case Result.Success(j) => parseDeviceCode(j)
@@ -111,7 +112,7 @@ object CopilotAuth:
       "client_id"   -> Jx.str(clientId),
       "device_code" -> Jx.str(deviceCode),
       "grant_type"  -> Jx.str("urn:ietf:params:oauth:grant-type:device_code")))
-    Abort.run[ProviderError](Transport.postJson(accessTokenUrl, List("accept" -> "application/json"), body)).map {
+    Abort.run[HttpError](Transport.postJson(accessTokenUrl, List("accept" -> "application/json"), body)).map {
       case Result.Success(b) =>
         Jx.parse(b) match
           case Result.Success(j) => classifyPoll(j)

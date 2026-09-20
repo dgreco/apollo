@@ -2,7 +2,7 @@ package apollo.gateway
 
 import apollo.agent.TurnCallbacks
 import apollo.config.ApolloConfig
-import apollo.provider.{ProviderError, Transport}
+import apollo.http.{HttpError, Transport}
 import apollo.util.Jx
 import apollo.util.Jx.*
 import kyo.*
@@ -134,7 +134,7 @@ object Telegram:
   private def poll(
       token: String, config: ApolloConfig, hub: SessionHub, queue: Channel[Job], offset: Long
   ): Unit < (Sync & Async) =
-    Abort.run[ProviderError] {
+    Abort.run[HttpError] {
       // The server holds the connection up to 50s; the client budget must
       // outlast it (kyo-http's default 5s total-lifecycle timeout cannot).
       Transport.getJson(api(token, "getUpdates") + s"?timeout=50&offset=$offset", Nil, timeout = 75.seconds)
@@ -233,7 +233,7 @@ object Telegram:
 
   private def send(token: String, chat: Long, text: String): Unit < (Sync & Async) =
     val body = Jx.render(Jx.obj("chat_id" -> Jx.num(chat), "text" -> Jx.str(text)))
-    Abort.run[ProviderError](Transport.postJson(api(token, "sendMessage"), Nil, body, timeout = 30.seconds)).map {
+    Abort.run[HttpError](Transport.postJson(api(token, "sendMessage"), Nil, body, timeout = 30.seconds)).map {
       case Result.Success(_) => ()
       case Result.Failure(e) => Console.printLine(s"telegram: send failed: ${e.getMessage.take(200)}")
       case Result.Panic(e)   => Console.printLine(s"telegram: send failed: ${e.getMessage}")
@@ -244,7 +244,7 @@ object Telegram:
     if text.isBlank then Absent
     else
       val body = Jx.render(Jx.obj("chat_id" -> Jx.num(chat), "text" -> Jx.str(text.take(maxMessage))))
-      Abort.run[ProviderError](Transport.postJson(api(token, "sendMessage"), Nil, body, timeout = 30.seconds)).map {
+      Abort.run[HttpError](Transport.postJson(api(token, "sendMessage"), Nil, body, timeout = 30.seconds)).map {
         case Result.Success(resp) =>
           Jx.parse(resp) match
             case Result.Success(v) => (v / "result" / "message_id").asLong.map(_.toString)
@@ -258,9 +258,9 @@ object Telegram:
       "chat_id" -> Jx.num(chat),
       "message_id" -> Jx.num(messageId.toLongOption.getOrElse(0L)),
       "text" -> Jx.str(text.take(maxMessage))))
-    Abort.run[ProviderError](Transport.postJson(api(token, "editMessageText"), Nil, body, timeout = 30.seconds)).unit
+    Abort.run[HttpError](Transport.postJson(api(token, "editMessageText"), Nil, body, timeout = 30.seconds)).unit
 
   private def sendChatAction(token: String, chat: Long): Unit < (Sync & Async) =
     val body = Jx.render(Jx.obj("chat_id" -> Jx.num(chat), "action" -> Jx.str("typing")))
-    Abort.run[ProviderError](Transport.postJson(api(token, "sendChatAction"), Nil, body, timeout = 15.seconds)).unit
+    Abort.run[HttpError](Transport.postJson(api(token, "sendChatAction"), Nil, body, timeout = 15.seconds)).unit
 end Telegram

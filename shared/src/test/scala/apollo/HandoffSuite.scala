@@ -5,7 +5,6 @@ import apollo.core.*
 import apollo.provider.{ApiMode, ResolvedRuntime}
 import apollo.session.{HandoffStore, SessionStore}
 import apollo.util.Jx
-import apollo.util.Jx.*
 import kyo.*
 
 /** `/handoff` control channel: the record format, consume-once semantics, and

@@ -2,6 +2,7 @@ package apollo.agent
 
 import apollo.config.ApolloConfig
 import apollo.core.*
+import apollo.http.HttpError
 import apollo.provider.*
 import apollo.session.SessionStore
 import kyo.*
@@ -122,7 +123,7 @@ object Compression:
     )
     WireTransport.forMode(runtime.apiMode) match
       case Result.Success(transport) =>
-        Abort.run[ProviderError](transport.streamTurn(request)(_ => ())).map {
+        Abort.run[HttpError](transport.streamTurn(request)(_ => ())).map {
           case Result.Success(resp) =>
             resp.message.content.collect { case Content.Text(t) => t }.mkString("\n") match
               case ""   => fallbackSummary(middle)
