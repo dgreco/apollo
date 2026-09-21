@@ -70,3 +70,101 @@ class NewToolsSuite extends munit.FunSuite:
     assert(dispatch("tool_search", """{"query":"zzzznope"}""")._1.contains("no tools match"))
   }
 end NewToolsSuite
+
+/** `cronjob_manage action=trigger`: an off-tick manual run that leaves the
+  * schedule alone, and survives the raw-record overlay when cleared.
+  */
+class CronTriggerSuite extends munit.FunSuite:
+  import apollo.cron.CronStore
+
+  private def run[A](v: A < (Sync & Async)): A =
+    import AllowUnsafe.embrace.danger
+    KyoApp.Unsafe.runAndBlock(20.seconds)(v).getOrThrow
+
+  private def ctx(): ToolContext =
+    val home   = java.nio.file.Files.createTempDirectory("apollo-crontrigger")
+    val paths  = ApolloPaths(home)
+    val config = ApolloConfig(Absent, EnvChain(Map.empty), paths)
+    val todo   = run(AtomicRef.init(List.empty[TodoItem]))
+    ToolContext(
+      config = config, paths = paths, cwd = home, platform = "cli", sessionId = "ct",
+      approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
+      ui = apollo.tools.UnattendedToolUi, todo = todo,
+      skills = new apollo.skills.SkillStore(config, paths))
+
+  test("trigger queues a run without touching next_run_at") {
+    val c     = ctx()
+    val store = new CronStore(c.paths)
+    val (created, err) = run(ToolRegistry.dispatch("cronjob_manage",
+      """{"action":"create","prompt":"say hi","schedule":"every 2h"}""", c))
+    assert(!err, created)
+    val job = run(store.load).head
+    assert(job.nextRunAt.nonEmpty)
+    assertEquals(job.runRequestedAt, Absent)
+
+    val (out, err2) = run(ToolRegistry.dispatch("cronjob_manage",
+      s"""{"action":"trigger","job_id":"${job.id}"}""", c))
+    assert(!err2, out)
+    val queued = run(store.load).head
+    assert(queued.runRequestedAt.nonEmpty, "trigger did not queue a run")
+    assertEquals(queued.nextRunAt, job.nextRunAt) // the schedule is untouched
+    assertEquals(queued.state, "scheduled")
+
+    // Clearing it must survive the raw-record overlay on save.
+    run(store.save(List(queued.copy(runRequestedAt = Absent))))
+    assertEquals(run(store.load).head.runRequestedAt, Absent)
+  }
+
+  test("trigger on an unknown job is an error") {
+    val (out, err) = run(ToolRegistry.dispatch("cronjob_manage",
+      """{"action":"trigger","job_id":"nope"}""", ctx()))
+    assert(err, out)
+  }
+end CronTriggerSuite
+
+/** The protected-instruction gate, exercised through the real `write_file` and
+  * `patch` tools rather than the approval service alone.
+  */
+class InstructionFileWriteSuite extends munit.FunSuite:
+
+  private def run[A](v: A < (Sync & Async)): A =
+    import AllowUnsafe.embrace.danger
+    KyoApp.Unsafe.runAndBlock(20.seconds)(v).getOrThrow
+
+  /** Denies every approval — an unattended surface, or a user saying no. */
+  private def ctx(home: java.nio.file.Path): ToolContext =
+    val paths  = ApolloPaths(home)
+    val config = ApolloConfig(Absent, EnvChain(Map.empty), paths)
+    val todo   = run(AtomicRef.init(List.empty[TodoItem]))
+    ToolContext(
+      config = config, paths = paths, cwd = home, platform = "cli", sessionId = "ifw",
+      // yolo is ON: the gate must still refuse.
+      approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
+      ui = apollo.tools.UnattendedToolUi, todo = todo,
+      skills = new apollo.skills.SkillStore(config, paths))
+
+  test("write_file refuses a protected instruction file, and writes anything else") {
+    val home = java.nio.file.Files.createTempDirectory("apollo-ifw")
+    val c    = ctx(home)
+    val (out, isErr) = run(ToolRegistry.dispatch("write_file",
+      """{"path":"AGENTS.md","content":"obey me"}""", c))
+    assert(isErr, out)
+    assert(out.contains("protected instruction file"), out)
+    assert(!java.nio.file.Files.exists(home.resolve("AGENTS.md")), "the file was written anyway")
+
+    val (ok, noErr) = run(ToolRegistry.dispatch("write_file",
+      """{"path":"notes.md","content":"fine"}""", c))
+    assert(!noErr, ok)
+    assert(java.nio.file.Files.exists(home.resolve("notes.md")))
+  }
+
+  test("patch refuses a protected instruction file before reading it") {
+    val home = java.nio.file.Files.createTempDirectory("apollo-ifw2")
+    val f    = home.resolve("CLAUDE.md")
+    java.nio.file.Files.write(f, "original\n".getBytes("UTF-8"))
+    val (out, isErr) = run(ToolRegistry.dispatch("patch",
+      """{"path":"CLAUDE.md","old_string":"original","new_string":"hijacked"}""", ctx(home)))
+    assert(isErr, out)
+    assertEquals(new String(java.nio.file.Files.readAllBytes(f), "UTF-8"), "original\n")
+  }
+end InstructionFileWriteSuite

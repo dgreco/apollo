@@ -12,6 +12,11 @@ import kyo.Structure.Value
 trait McpConnection:
   def serverName: String
   def alive: Boolean
+  /** True for the stdio transport (a spawned child). A child that dies while
+    * a call is in flight may already have applied it, which is what makes a
+    * blind retry unsafe there — see `McpServerHandle.request`.
+    */
+  def stdio: Boolean
   /** The server's `initialize` result (capabilities gate the generated
     * resource/prompt utility tools).
     */
@@ -66,6 +71,7 @@ final class McpClient private (
     (m, _) => Result.fail(s"method not supported: $m")
 
   def alive: Boolean = deadReason.isEmpty
+  def stdio: Boolean = true
 
   /** Sends one request and waits for its response (result object), failing
     * with a readable message on JSON-RPC error, timeout, or a dead server.

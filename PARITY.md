@@ -1,9 +1,11 @@
 # apollo vs Hermes — Feature Parity
 
 A sourced map of where apollo stands against the upstream **NousResearch Hermes
-agent** (`github.com/NousResearch/hermes-agent`, audited at commit `089bb32`,
-release `v2026.8.31`). Companion to `REPL_PARITY.md` (which covers the REPL
-slash commands specifically).
+agent** (`github.com/NousResearch/hermes-agent`). First audited at commit
+`089bb32`; **re-audited against `main` @ `5bb314f` (2026-09-21)**, which is three
+releases later — v0.21.1 (`v2026.9.7`), v0.21.2 (`v2026.9.11`), v0.21.3
+(`v2026.9.14`) — and ~7,700 commits of upstream movement. Companion to
+`REPL_PARITY.md` (which covers the REPL slash commands specifically).
 
 **TL;DR.** apollo faithfully reimplements Hermes's **core** (agent loop, the four
 wire protocols, MCP client, a few gateways, sessions/memory/skills, the REPL).
@@ -126,12 +128,91 @@ WhatsApp Cloud, Twilio SMS, MS Teams, iMessage, and email** (email is JVM-only �
 see above).
 
 Still open (deliberately, or larger): MCP **server mode** + legacy HTTP+SSE
-transport; OAuth for **ChatGPT/Codex** (loopback-PKCE broker), **xAI**, native
-Gemini, MoA; and live validation of the reverse-engineered Copilot/Qwen and
-Bedrock-stream flows. Group C stays out of scope (platform, not core agent).
+transport; OAuth for **ChatGPT/Codex**, **xAI**, native Gemini, MoA; and live
+validation of the reverse-engineered Copilot/Qwen and Bedrock-stream flows.
+Group C stays out of scope (platform, not core agent).
+
+> **Codex OAuth is cheaper than this note used to assume.** The `openai-codex`
+> profile is marked unsupported for wanting a "ChatGPT OAuth broker", but
+> upstream's new `auth.codex_login_flow` documents **device code as the
+> default**, with browser/loopback-PKCE only as the fallback for orgs that
+> disable the device grant. apollo already implements device-code twice
+> (Copilot, Qwen), so this is now the cheapest remaining Group-A item.
+
+---
+
+## Realignment: 2026-09-21 (upstream `main` @ `5bb314f`)
+
+The re-audit found the **contract intact** — today's 2,267-line upstream
+`cli-config.yaml.example` parses and reads correctly (the fixture under
+`shared/src/test/resources/` was refreshed to it, and `UpstreamConfigCompatSuite`
+now asserts the post-0.21 keys too). These behavioural drifts were found and
+**fixed**:
+
+| Drift | Fix |
+|---|---|
+| A stdio MCP server dying **mid-call** made apollo reconnect and **replay the tool call** — a non-idempotent action could be applied twice (upstream #106546). | `McpServerHandle.request` now distinguishes "dead before dispatch" (safe: retried once) from "died in flight" (returns an explicit *outcome uncertain* error and reconnects for later calls). Read-only methods stay replayable; HTTP keeps its session-expired retry. |
+| `compression.threshold_tokens` became a **default-on 256000 cap** upstream; apollo had no absolute cap, so it compressed far later on large-window models. | `Compression.triggerAt` fires at the lower of the ratio threshold and the cap (cap clamped to the window); `threshold_tokens: null` restores ratio-only. |
+| Writes to files that steer the agent itself (`AGENTS.md`, `CLAUDE.md`, `SOUL.md`, `.cursorrules`) were ungated. | `approvals.protected_instruction_files` (default on) + `protected_instruction_extra_patterns`: `write_file`/`patch` ask a human **every time, even under `--yolo`**, and an unattended surface refuses. |
+| MCP keepalive pinged **stdio** children every 180s; upstream now defaults keepalive to HTTP servers only. | Default is 0 (off) for stdio, 180s for HTTP; an explicit `keepalive_interval` opts a stdio server back in (still floored at 5s). |
+| The background auto-reviewer held the full `memory` tool, including `remove` (upstream #106310). | `ToolContext.memoryDeletesAllowed` is false for the reviewer: it may add or amend, never delete. |
+| `cronjob_manage` was missing upstream's **`trigger`** action. | `trigger` queues an off-tick run (`run_requested_at`) that the scheduler honours **without** advancing `next_run_at`, so running now never cancels the scheduled run (upstream #106306). A paused job can still be triggered. |
+| `display.show_reasoning` default was `false`; upstream flipped it to `true`. | Default is now `true`. |
+| The webhook-safe toolset lacked `vision_analyze`, and the `skills` toolset lacked `skill_manage`. | Both match upstream's sets. |
+| `/reasoning` split awkwardly across two apollo commands, and `/history` was an alias of `/status`. | `/reasoning <level\|show\|hide>` is one command (`/reasoning-display` kept as an alias); `/history` now prints the conversation, as upstream's does. |
+| The native Anthropic model list predated the Claude 5 family. | `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5` (4.6 ids kept). |
+
+**Checked and already aligned** (no change needed): MCP OAuth refresh keeps the
+old refresh token when a server omits one (upstream #106185's class); Anthropic
+requests send exactly one credential header (#107978); `tool_search` matches the
+whole query, so it never returns the "five tools sharing one word" noise (#106676);
+cron advances schedules before executing (at-most-once); upstream **deleted** the
+`session_reset` section entirely, which apollo never implemented.
+
+**New upstream config accepted-and-ignored** (the contract holds; each is a
+roadmap candidate, not a bug): `agent.auto_recovery_cycles` (a wait-and-retry
+layer after the fallback chain is spent), `agent.restart_after_turn_timeout`,
+`agent.verify_on_stop`, `delegation.fallback_providers`, `auxiliary.vision.*`,
+`auxiliary.compression.no_progress_timeout`, `title_generation.model_upgrade_enabled`,
+`cron.catch_up_missed`, provider `extra_body` / `session_affinity_header`,
+`model.ollama_num_ctx`, OpenRouter per-model routing overrides, browser
+`restrict_evaluate` / `allow_unsafe_evaluate`, the dict form of `reasoning_effort`,
+Telegram `drop_pending_on_cold_boot` / `allow_cjk_rich_messages`, Discord
+`bots_require_inline_mention` / `free_response_auto_thread`, `tts.delivery_profiles`,
+`transcribe.openai.timeout`/`max_retries`, `display.suppress_warning_notifications`,
+the new top-level `auth:` section, and `updates.check`. Upstream also **removed**
+`model.max_tokens` as user configuration ("output limits are provider-owned");
+apollo still honours it, a harmless superset.
+
+**Open, deliberately not built in this pass** (features, not drift): MCP `lazy:`
+servers (register from an on-disk schema cache, connect on first tool call — needs
+a cache format apollo has no equivalent of), and the two new upstream provider
+plugins `alibaba-coding-plan` and `copilot-acp`. Upstream's REPL registry is now
+102 commands (was 92); the newly feasible ones for apollo are `/undo`, `/export`,
+`/context`, `/toolsets` and `/reload-mcp`.
 
 ## Method / reproducing this audit
 
 Two parallel agents: one censused apollo's code (`shared|jvm|native/src/main`),
 one mapped Hermes from the upstream repo. Re-run when Hermes moves — it is
 date-tag versioned and changes fast.
+
+The 2026-09-21 re-audit was narrower and mechanical, and is the cheaper one to
+repeat:
+
+1. `gh api repos/NousResearch/hermes-agent/commits/main` for the new baseline,
+   and the release notes for every tag since the last audited commit — they name
+   the behavioural fixes by PR number.
+2. Diff `cli-config.yaml.example` against
+   `shared/src/test/resources/cli-config.yaml.example`; every added key is either
+   a new knob to implement or a parse-and-ignore to record, and every changed
+   default is possible drift. Refresh the fixture and run
+   `sbt "agentJVM/testOnly *UpstreamConfigCompatSuite"` — that test **is** the
+   config contract.
+3. Diff the registries: `toolsets.py` against `apollo/tools/Toolsets.scala`,
+   `hermes_cli/commands.py`'s `COMMAND_REGISTRY` against
+   `ReplCommands.commandCatalog`, and `plugins/model-providers/*/` against
+   `Profiles.scala`.
+4. For each behavioural fix named in the notes, `gh api
+   repos/NousResearch/hermes-agent/pulls/<n>` — the PR body states the intended
+   contract precisely enough to mirror without reading the Python.

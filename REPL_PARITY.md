@@ -24,8 +24,8 @@ un-built is only the commands with no real apollo foundation (`/plugins`,
 | Group | Commands |
 |---|---|
 | Meta | `/help`, `/version`·`/v`, `/whoami` |
-| Model | `/model`, `/reasoning`, `/reasoning-display`, `/verbose` |
-| Session | `/status`·`/history` (real token/context %), `/usage`, `/config`, `/profile`, `/reset`·`/new`, `/clear`, `/redraw`, `/title`, `/compress`·`/compact`, `/save`, `/prompt`·`/compose`, `/retry`, `/copy`, `/image`, `/sessions`, `/resume`, `/branch`·`/fork` |
+| Model | `/model`, `/reasoning` (`<level>` or `show`/`hide`; `/reasoning-display` is an alias), `/verbose` |
+| Session | `/status` (real token/context %), `/history` (the conversation), `/usage`, `/config`, `/profile`, `/reset`·`/new`, `/clear`, `/redraw`, `/title`, `/compress`·`/compact`, `/save`, `/prompt`·`/compose`, `/retry`, `/copy`, `/image`, `/sessions`, `/resume`, `/branch`·`/fork` |
 | Work | `/plan`, `/init`, `/diff`, `/loop`, `/bg`, `/agents`·`/tasks`, `/stop`, `/review`, `/goal`, `/queue`, `/moa`, `/learn`, `/heartbeat`·`/hb`, `/steer` (queues for next turn; mid-turn pending the TUI layer), `/worktree`, `/snapshot`, `/rollback` |
 | Tools & services | `/tools`, `/skills`, `/reload-skills`, `/mcp`, `/cron`, `/memory` |
 | Approvals | `/yolo`, `/approvals` |
@@ -56,6 +56,19 @@ Nous backend (`/subscription`, `/topup`, `/insights`, `/update`, `/debug`),
 audio (`/voice`, `/wake`), browser CDP (`/browser`), and rich-TUI chrome toggles
 (`/skin`, `/statusbar`, `/battery`, `/indicator`, `/timestamps`, `/footer`,
 `/focus`, `/personality`, `/palette`, `/pet`, `/hatch`).
+
+### Newly upstream (2026-09-21 re-audit)
+Upstream's `COMMAND_REGISTRY` is now **102 commands** (92 at the first audit).
+Most of the additions are platform surface apollo does not have, but these are
+feasible and unbuilt: `/undo` (back up N user turns and re-prompt), `/export`
+(apollo has `/save` in markdown only), `/context` (a context breakdown next to
+`/status`), `/toolsets`, and `/reload-mcp` (still deferred for the reason in
+"Blocked by architecture" — the fixed `toolNames` list).
+
+Two commands were **realigned** in that pass rather than added: `/reasoning` now
+covers both halves of upstream's command (`<level>` and `show`/`hide`, with
+`/reasoning-display` kept as an alias), and `/history` prints the conversation —
+upstream's meaning — instead of aliasing `/status`.
 
 ---
 

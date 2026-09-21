@@ -369,17 +369,32 @@ final class Repl(
           Console.printLine(s"model: ${runtime.model} (provider: ${runtime.providerSlug})").andThen(true)
         else
           switchModel(arg).andThen(true)
-      case "reasoning" =>
-        apollo.provider.Reasoning.fromConfigValue(arg) match
-          case Present(cfg) =>
-            runtime = runtime.copy(reasoning = Present(cfg))
-            Console.printLine(s"reasoning effort: ${cfg.effort}").andThen(true)
-          case Absent =>
-            Console.printLine("usage: /reasoning none|minimal|low|medium|high|xhigh|max").andThen(true)
+      // One command for both halves, as upstream: a level sets the effort,
+      // show/hide toggles whether thinking is rendered.
+      case "reasoning" | "reasoning-display" =>
+        val a       = arg.trim.toLowerCase
+        val display = Set("show", "on", "hide", "off")
+        if display(a) || (name == "reasoning-display" && a.isEmpty) then
+          showThinking =
+            if a == "show" || a == "on" then true
+            else if a == "hide" || a == "off" then false
+            else !showThinking // bare legacy /reasoning-display toggles
+          Console.printLine(s"thinking display: ${if showThinking then "on" else "off"}").andThen(true)
+        else
+          apollo.provider.Reasoning.fromConfigValue(arg) match
+            case Present(cfg) =>
+              runtime = runtime.copy(reasoning = Present(cfg))
+              Console.printLine(s"reasoning effort: ${cfg.effort}").andThen(true)
+            case Absent =>
+              Console.printLine(
+                "usage: /reasoning none|minimal|low|medium|high|xhigh|max, or /reasoning show|hide"
+              ).andThen(true)
       case "reset" | "new" =>
         agent.restore(Nil)
         Console.printLine("conversation cleared").andThen(true)
-      case "history" | "status" =>
+      case "history" =>
+        Console.printLine(ReplCommands.historyLines(agent.history)).andThen(true)
+      case "status" =>
         Console.printLine(ReplCommands.statusLines(
           sess, runtime.model, runtime.providerSlug,
           agent.history.length, agent.apiCallCount, agent.usageSnapshot,
@@ -393,7 +408,14 @@ final class Repl(
           "profile"          -> ReplCommands.profileName(toolCtx.paths.home),
           "approvals"        -> toolCtx.approvals.currentApprovalMode,
           "yolo"             -> (if toolCtx.approvals.yoloEnabled then "on" else "off"),
-          "compression"      -> (if c.compressionEnabled then s"on (threshold ${c.compressionThreshold})" else "off"),
+          "compression"      -> (
+            if !c.compressionEnabled then "off"
+            else
+              val cap = c.compressionThresholdTokens match
+                case Present(t) => s", cap $t tok"
+                case Absent     => ""
+              s"on (threshold ${c.compressionThreshold}$cap)"
+          ),
           "context window"   -> runtime.contextLength.getOrElse(200_000).toString,
           "memory"           -> (if c.memoryEnabled then "enabled" else "disabled"),
           "terminal backend" -> c.terminalBackend,
@@ -427,9 +449,6 @@ final class Repl(
       case "verbose" =>
         toolProgress = !toolProgress
         Console.printLine(s"tool progress: ${if toolProgress then "on" else "off"}").andThen(true)
-      case "reasoning-display" =>
-        showThinking = !showThinking
-        Console.printLine(s"thinking display: ${if showThinking then "on" else "off"}").andThen(true)
       case "compress" | "compact" =>
         agent.requestCompress()
         Console.printLine("compaction requested — runs before the next model call").andThen(true)
@@ -628,7 +647,8 @@ final class Repl(
                   val id  = s"job-${java.util.UUID.randomUUID.toString.take(8)}"
                   val job = CronJob(id, s"blueprint:$name", prompt, kind, expr, bp.schedule,
                     enabled = true, state = "scheduled", nextRunAt = nextRun.map(_.getEpochSecond.toDouble),
-                    lastRunAt = Absent, lastStatus = Absent, deliver = Absent, raw = Jx.obj())
+                    runRequestedAt = Absent, lastRunAt = Absent, lastStatus = Absent,
+                    deliver = Absent, raw = Jx.obj())
                   new CronStore(toolCtx.paths).upsert(job)
                     .andThen(Console.printLine(s"created cron job $id from '$name': $prompt"))
                 case _ => Console.printLine(Style.red("blueprint schedule parse failed"))

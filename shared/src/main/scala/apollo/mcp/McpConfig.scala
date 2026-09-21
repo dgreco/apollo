@@ -128,6 +128,14 @@ object McpConfig:
     // whitelist mode; `include: []` therefore registers nothing.
     val include = tools.flatMap(_.field("include")).map(n => n.strings.getOrElse(Nil).map(interp))
     val trust   = node.field("trust").flatMap(_.str).map(_.trim.toLowerCase)
+    val url     = node.field("url").flatMap(_.str).map(interp)
+    // Upstream `_DEFAULT_KEEPALIVE_INTERVAL, _MIN_KEEPALIVE_INTERVAL = 180, 5`,
+    // and since 0.21.x only HTTP servers keep it by default: a stdio child is
+    // watched by its own pipe, so pinging it earns nothing. An explicit
+    // interval opts a stdio server back in (still floored at 5s, as upstream).
+    val keepalive = node.field("keepalive_interval").flatMap(_.double) match
+      case Present(v) => v.max(5.0)
+      case Absent     => if url.isEmpty then 0.0 else 180.0
     McpServerConfig(
       name = name,
       enabled = boolish(node.field("enabled"), default = true),
@@ -136,7 +144,7 @@ object McpConfig:
       env = node.field("env").flatMap(_.entries).getOrElse(Nil)
         .flatMap((k, v) => v.str.map(s => k -> interp(s)).toList).toMap,
       cwd = node.field("cwd").flatMap(_.str).map(interp),
-      url = node.field("url").flatMap(_.str).map(interp),
+      url = url,
       headers = node.field("headers").flatMap(_.entries).getOrElse(Nil)
         .flatMap((k, v) => v.str.map(s => k -> interp(s)).toList),
       transport = node.field("transport").flatMap(_.str).map(_.trim.toLowerCase),
@@ -144,9 +152,7 @@ object McpConfig:
       connectTimeoutSeconds = node.field("connect_timeout").flatMap(_.double)
         .getOrElse(defaultConnectTimeout).max(1.0),
       toolTimeoutSeconds = node.field("timeout").flatMap(_.double).getOrElse(globalToolTimeout),
-      // Upstream `_DEFAULT_KEEPALIVE_INTERVAL, _MIN_KEEPALIVE_INTERVAL = 180, 5`.
-      keepaliveIntervalSeconds = node.field("keepalive_interval").flatMap(_.double)
-        .getOrElse(180.0).max(5.0),
+      keepaliveIntervalSeconds = keepalive,
       include = include,
       exclude = tools.flatMap(_.field("exclude")).flatMap(_.strings).getOrElse(Nil).map(interp),
       resourceTools = boolish(tools.flatMap(_.field("resources")), default = true),

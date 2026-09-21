@@ -57,6 +57,13 @@ class ToolsetsSuite extends munit.FunSuite:
     val webhook = Toolsets.resolve("apollo-webhook")
     assert(!webhook.contains("terminal"))
     assert(!webhook.contains("write_file"))
+    // Reading and looking are safe on untrusted input (upstream's set).
+    assert(webhook.contains("vision_analyze"))
+  }
+
+  test("the skills toolset carries skill_manage, as upstream's does") {
+    assertEquals(Toolsets.resolve("skills").toSet,
+      Set("skills_list", "skill_view", "skill_manage"))
   }
 
   test("upstream legacy bundle names translate to the apollo-* bundles") {

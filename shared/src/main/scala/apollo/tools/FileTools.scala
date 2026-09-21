@@ -113,8 +113,12 @@ object FileTools:
     ((args / "path").asStr, (args / "content").asStr) match
       case (Present(path), Present(content)) =>
         val file = resolvePath(path, ctx)
-        Fs.writeString(file, content).map { _ =>
-          ToolOutcome.Ok(s"""{"success":true,"path":"$file","bytes":${content.getBytes("UTF-8").length}}""")
+        ctx.approvals.checkInstructionWrite(List(file), ctx.ui).map {
+          case Result.Failure(err) => ToolOutcome.Error(err)
+          case _                   =>
+            Fs.writeString(file, content).map { _ =>
+              ToolOutcome.Ok(s"""{"success":true,"path":"$file","bytes":${content.getBytes("UTF-8").length}}""")
+            }
         }
       case _ => ToolOutcome.Error("missing required parameters: path, content")
 
@@ -125,16 +129,20 @@ object FileTools:
       case (Present(path), Present(oldString), Present(newString)) =>
         val replaceAll = (args / "replace_all").asBool.getOrElse(false)
         val file       = resolvePath(path, ctx)
-        Fs.readString(file).map {
-          case Absent => ToolOutcome.Error(s"file not found: $file")
-          case Present(content) =>
-            applyPatch(content, oldString, newString, replaceAll) match
-              case Result.Failure(err) => ToolOutcome.Error(err)
-              case Result.Success(updated) =>
-                Fs.writeString(file, updated).map { _ =>
-                  ToolOutcome.Ok(unifiedDiff(file.toString, content, updated))
-                }
-              case _ => ToolOutcome.Error("patch failed")
+        ctx.approvals.checkInstructionWrite(List(file), ctx.ui).map {
+          case Result.Failure(err) => ToolOutcome.Error(err)
+          case _                   =>
+            Fs.readString(file).map {
+              case Absent => ToolOutcome.Error(s"file not found: $file")
+              case Present(content) =>
+                applyPatch(content, oldString, newString, replaceAll) match
+                  case Result.Failure(err) => ToolOutcome.Error(err)
+                  case Result.Success(updated) =>
+                    Fs.writeString(file, updated).map { _ =>
+                      ToolOutcome.Ok(unifiedDiff(file.toString, content, updated))
+                    }
+                  case _ => ToolOutcome.Error("patch failed")
+            }
         }
       case _ => ToolOutcome.Error("missing required parameters: path, old_string, new_string")
 

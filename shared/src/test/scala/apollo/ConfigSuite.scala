@@ -4,8 +4,10 @@ import apollo.config.*
 import apollo.config.Yaml.*
 import kyo.{Absent, Present, Result}
 
-/** Parses the REAL upstream `cli-config.yaml.example` (2100+ lines, shipped as
-  * a test fixture) — the config-compatibility contract.
+/** Parses the REAL upstream `cli-config.yaml.example` (2200+ lines, shipped as
+  * a test fixture, refreshed from hermes-agent `main` @ 5bb314f, 2026-09-21) —
+  * the config-compatibility contract. Refresh the fixture whenever upstream
+  * moves: it is the only thing that proves a real config still loads.
   */
 class UpstreamConfigCompatSuite extends munit.FunSuite:
 
@@ -52,6 +54,24 @@ class UpstreamConfigCompatSuite extends munit.FunSuite:
     assertEquals(config.platformToolsets("cli"), Present(List("hermes-cli")))
     assertEquals(config.platformToolsets("telegram"), Present(List("hermes-telegram")))
     assertEquals(config.platformToolsets("nonexistent"), Absent)
+  }
+
+  test("post-0.21 keys read with the upstream defaults") {
+    // Absolute compression cap, on by default upstream since 0.21.x.
+    assertEquals(config.compressionThresholdTokens, Present(256000L))
+    // display.show_reasoning flipped to true.
+    assertEquals(config.showReasoning, true)
+    // The instruction-file write gate is on unless turned off.
+    assertEquals(config.protectedInstructionFiles, true)
+    assertEquals(config.protectedInstructionExtraPatterns, Nil)
+  }
+
+  test("sections added upstream after this build still navigate (parse-and-ignore)") {
+    // `auth:` (login policy) and `cron.catch_up_missed` are not acted on here,
+    // but must not break the load.
+    assert(config.root.flatMap(_.path("auth", "adopt_external_logins")).flatMap(_.bool) == Present(true))
+    assert(config.root.flatMap(_.path("cron", "catch_up_missed")).flatMap(_.bool) == Present(true))
+    assert(config.root.flatMap(_.path("updates", "check")).flatMap(_.bool) == Present(true))
   }
 
   test("display and session settings read") {
@@ -185,6 +205,24 @@ class RootModelKeySuite extends munit.FunSuite:
       cfg("model:\n  default:\n    model: \"nested\"\n    provider: \"p\"\n").modelDefault,
       Present("nested")
     )
+  }
+
+class CompressionCapSuite extends munit.FunSuite:
+
+  private def cfg(yaml: String): ApolloConfig =
+    ApolloConfig(
+      Present(Yaml.parse(yaml).getOrElse(fail("parse"))),
+      EnvChain(Map.empty),
+      ApolloPaths(java.nio.file.Paths.get("/tmp"))
+    )
+
+  test("threshold_tokens: unset = upstream default, explicit null = ratio-only") {
+    assertEquals(cfg("compression:\n  threshold: 0.5\n").compressionThresholdTokens, Present(256000L))
+    assertEquals(cfg("compression:\n  threshold_tokens: null\n").compressionThresholdTokens, Absent)
+    assertEquals(cfg("compression:\n  threshold_tokens: 120000\n").compressionThresholdTokens,
+      Present(120000L))
+    // A nonsensical cap is ignored rather than compressing on every turn.
+    assertEquals(cfg("compression:\n  threshold_tokens: 0\n").compressionThresholdTokens, Absent)
   }
 
 class ManagedOverlaySuite extends munit.FunSuite:

@@ -18,10 +18,11 @@ object CronTool:
       name = "cronjob_manage",
       toolset = "cronjob",
       description =
-        "Manage scheduled tasks. Schedules: '30m' / 'in 30m' (one-shot), 'every 2h', 'every monday 9am', " +
-          "a 5-field cron expression, or an ISO datetime.",
+        "Manage scheduled tasks: create, list, update, pause, resume, remove, and trigger (run once now, " +
+          "leaving the schedule alone; a paused job can still be triggered). Schedules: '30m' / 'in 30m' " +
+          "(one-shot), 'every 2h', 'every monday 9am', a 5-field cron expression, or an ISO datetime.",
       parametersJson = """{"type":"object","properties":{
-        "action":{"type":"string","enum":["create","list","update","pause","resume","remove"]},
+        "action":{"type":"string","enum":["create","list","update","pause","resume","remove","trigger"]},
         "job_id":{"type":"string"},
         "prompt":{"type":"string","description":"Full self-contained prompt for the job"},
         "schedule":{"type":"string","description":"Required for create"},
@@ -55,6 +56,7 @@ object CronTool:
                     enabled = true,
                     state = "scheduled",
                     nextRunAt = nextRun.map(_.getEpochSecond.toDouble),
+                    runRequestedAt = Absent,
                     lastRunAt = Absent,
                     lastStatus = Absent,
                     deliver = (args / "deliver").asStr,
@@ -104,6 +106,18 @@ object CronTool:
       case "resume" =>
         withJob(store, args)(job =>
           store.upsert(job.copy(state = "scheduled", enabled = true)).map(_ => ToolOutcome.Ok(s"resumed ${job.id}"))
+        )
+      case "trigger" =>
+        // An off-tick manual run: queued for the next tick of the scheduler in
+        // `apollo gateway`, and deliberately NOT a change to `next_run_at`, so
+        // running now never cancels the scheduled run (upstream #106306).
+        withJob(store, args)(job =>
+          Sync.defer(java.time.Instant.now().getEpochSecond.toDouble).map(now =>
+            store.upsert(job.copy(runRequestedAt = Present(now)))
+              .map(_ => ToolOutcome.Ok(
+                s"queued ${job.id} to run once at the next scheduler tick; " +
+                  "its schedule is unchanged"))
+          )
         )
       case "remove" =>
         (args / "job_id").asStr match

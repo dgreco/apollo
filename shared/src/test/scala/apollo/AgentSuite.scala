@@ -77,6 +77,18 @@ class CompressionSuite extends munit.FunSuite:
     )
   }
 
+  test("trigger: the absolute cap wins on a large window, the ratio on a small one") {
+    val cap = Present(256_000L)
+    // 1M window: 50% would be 500K, the cap fires first.
+    assertEquals(Compression.triggerAt(1_000_000L, 0.5, cap), 256_000L)
+    // 200K window: 50% is 100K, below the cap — the ratio still wins.
+    assertEquals(Compression.triggerAt(200_000L, 0.5, cap), 100_000L)
+    // A cap above the window is a no-op (clamped, ratio wins).
+    assertEquals(Compression.triggerAt(128_000L, 0.9, Present(900_000L)), 115_200L)
+    // Ratio-only when the cap is disabled.
+    assertEquals(Compression.triggerAt(1_000_000L, 0.5, Absent), 500_000L)
+  }
+
 class MessageModelSuite extends munit.FunSuite:
 
   test("messages round-trip through JSON (session persistence format)") {

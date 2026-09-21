@@ -20,7 +20,7 @@ class ReplCommandsSuite extends munit.FunSuite:
 
   private def job(id: String, enabled: Boolean, state: String) =
     CronJob(id, s"job-$id", "do it", "interval", "1h", "every 1h", enabled, state,
-      Present(1700000000.0), Absent, Absent, Absent, emptyValue)
+      Present(1700000000.0), Absent, Absent, Absent, Absent, emptyValue)
 
   private def mcpCfg(name: String) =
     McpServerConfig(name = name, enabled = true, command = Present("x"), args = Nil, env = Map.empty,
@@ -33,6 +33,25 @@ class ReplCommandsSuite extends munit.FunSuite:
     val m = Message(Role.Assistant,
       List(Content.Text("hello"), Content.Thinking("secret", Absent), Content.Text("world")), Absent)
     assertEquals(ReplCommands.messageText(m), "hello\nworld")
+  }
+
+  test("historyLines renders the transcript, summarizing tool traffic") {
+    val msgs = List(
+      Message.system("you are apollo"),
+      Message.user("hi"),
+      Message(Role.Assistant, List(Content.ToolUse("t1", "terminal", "{}"))),
+      Message.toolResults(List(Content.ToolResult("t1", "out", false))),
+      Message.assistant("done")
+    )
+    val h = ReplCommands.historyLines(msgs)
+    assert(!h.contains("you are apollo"), h)   // the system prompt is not conversation
+    assert(h.contains("user: hi"), h)
+    assert(h.contains("[tool call: terminal]"), h)
+    assert(h.contains("[1 tool result]"), h)
+    assert(h.contains("assistant: done"), h)
+    assertEquals(ReplCommands.historyLines(Nil), "no messages yet")
+    // long messages are clipped
+    assert(ReplCommands.historyLines(List(Message.user("x" * 50)), maxChars = 10).endsWith("…"))
   }
 
   test("statusLines shows tokens and context percent") {
@@ -188,7 +207,9 @@ class ReplCommandsSuite extends munit.FunSuite:
     assertEquals(ReplCommands.completeSlash("/handoff").map(_.name), List("handoff"))
     // alias prefix matches (q → quit)
     assert(ReplCommands.completeSlash("/q").exists(_.name == "quit"))
-    assert(ReplCommands.completeSlash("/hi").exists(_.name == "status")) // history alias
+    assert(ReplCommands.completeSlash("/hi").exists(_.name == "history")) // its own command now
+    // the legacy display toggle still completes, as an alias of /reasoning
+    assert(ReplCommands.completeSlash("/reasoning-d").exists(_.name == "reasoning"))
     // once a space is typed (args started), no menu
     assertEquals(ReplCommands.completeSlash("/model gpt"), Nil)
     // non-slash line → nothing

@@ -26,7 +26,7 @@ object ReplCommands:
       (if u.cacheReadTokens > 0 then s" / ${u.cacheReadTokens} cache-read" else "") +
       (if u.reasoningTokens > 0 then s" / ${u.reasoningTokens} reasoning" else "")
 
-  /** Body of `/status` and `/history` — real token + context figures. */
+  /** Body of `/status` — real token + context figures. */
   def statusLines(
       sessionId: String, model: String, provider: String,
       msgCount: Int, apiCalls: Int, usage: Usage,
@@ -40,6 +40,27 @@ object ReplCommands:
       s"tokens    ${formatUsage(usage)}  ·  total ${usage.total}",
       s"context   ~$lastPromptTokens / $contextWindow last prompt (${pct}%)"
     ).mkString("\n")
+
+  /** `/history`: the conversation so far, one block per message — upstream's
+    * `/history` shows the transcript (token/context numbers live in `/status`).
+    * Tool traffic is summarized rather than dumped, so a long turn stays
+    * readable.
+    */
+  def historyLines(messages: List[Message], maxChars: Int = 500): String =
+    val rows = messages.filter(_.role != Role.System).map { m =>
+      val who  = m.role.toString.toLowerCase
+      val text = messageText(m)
+      val body =
+        if text.nonEmpty then (if text.length > maxChars then text.take(maxChars) + "…" else text)
+        else
+          val calls   = m.content.collect { case t: Content.ToolUse => t.name }
+          val results = m.content.collect { case _: Content.ToolResult => () }.length
+          if calls.nonEmpty then s"[tool call: ${calls.mkString(", ")}]"
+          else if results > 0 then s"[$results tool result${if results == 1 then "" else "s"}]"
+          else "[no text]"
+      s"$who: $body"
+    }
+    if rows.isEmpty then "no messages yet" else rows.mkString("\n\n")
 
   def formatSessions(metas: List[SessionMeta], limit: Int = 20): String =
     if metas.isEmpty then "no saved sessions"
@@ -251,10 +272,11 @@ object ReplCommands:
     CommandInfo("version", List("v"), "", "show apollo + model version", "commands"),
     CommandInfo("whoami", Nil, "", "show access level", "commands"),
     CommandInfo("model", Nil, "[name]", "show or switch the model (provider:model or bare id)", "commands"),
-    CommandInfo("reasoning", Nil, "<level>", "none|minimal|low|medium|high|xhigh|max", "commands"),
-    CommandInfo("reasoning-display", Nil, "", "toggle thinking display", "commands"),
+    CommandInfo("reasoning", List("reasoning-display"), "<level|show|hide>",
+      "set effort (none|minimal|low|medium|high|xhigh|max) or show/hide thinking", "commands"),
     CommandInfo("verbose", Nil, "", "toggle tool-progress display", "commands"),
-    CommandInfo("status", List("history"), "", "model, message count, token usage, context %", "session"),
+    CommandInfo("status", Nil, "", "model, message count, token usage, context %", "session"),
+    CommandInfo("history", Nil, "", "the conversation so far", "session"),
     CommandInfo("usage", Nil, "", "cumulative token usage", "session"),
     CommandInfo("trace", Nil, "", "span tree of the last turn (prompt → response)", "session"),
     CommandInfo("metrics", Nil, "", "counters + latency histograms for this run", "session"),

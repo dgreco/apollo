@@ -28,7 +28,8 @@ object Toolsets:
     "vision_analyze", "execute_code", "tool_search", "image_generate"
   )
 
-  private val webhookSafeTools = List("web_search", "web_extract", "clarify")
+  // Upstream `_HERMES_WEBHOOK_SAFE_TOOLS`: reading and looking, no execution.
+  private val webhookSafeTools = List("web_search", "web_extract", "vision_analyze", "clarify")
 
   val all: Map[String, Def] = Map(
     // Atomic capability toolsets
@@ -37,7 +38,8 @@ object Toolsets:
     "terminal"       -> Def("Command execution and process management", List("terminal", "process_manage")),
     "file"           -> Def("File operations: read, write, patch, search",
                             List("read_file", "write_file", "patch", "search_files")),
-    "skills"         -> Def("Load skill documents", List("skills_list", "skill_view")),
+    "skills"         -> Def("Access, create and manage skill documents",
+                            List("skills_list", "skill_view", "skill_manage")),
     "todo"           -> Def("Task planning and tracking", List("todo_list")),
     "memory"         -> Def("Persistent memory across sessions", List("memory")),
     "session_search" -> Def("Search and recall past conversations", List("session_search")),

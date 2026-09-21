@@ -55,6 +55,7 @@ final class McpServerHandle(
   private val reconnectGate  = new java.util.concurrent.atomic.AtomicBoolean(false)
 
   def alive: Boolean          = current.exists(_.alive)
+  def stdio: Boolean          = cfg.isStdio
   def parked: Boolean         = parkedReason.nonEmpty
   def initializeResult: Value = current.map(_.initializeResult).getOrElse(Value.Null)
   def currentStrikes: Int     = strikes.get()
@@ -92,6 +93,30 @@ final class McpServerHandle(
     */
   private def isReconnectable(err: String, clientAlive: Boolean): Boolean =
     !clientAlive || (!err.contains("' error ") && !err.contains("timed out"))
+
+  /** Methods that can be re-sent after a reconnect without the server having
+    * done anything the first time: the read-only half of the protocol. Only
+    * `tools/call` acts, and an unknown method is treated as if it did.
+    */
+  private def isReplaySafe(method: String): Boolean =
+    method == "initialize" || method == "ping" || method == "tools/list" ||
+      method == "resources/list" || method == "resources/read" ||
+      method == "prompts/list" || method == "prompts/get"
+
+  /** A dispatched, acting call whose stdio child then died. HTTP keeps its
+    * retry: a rejected session means the request was refused, not run.
+    */
+  private def inFlightDeath(conn: McpConnection, liveAtDispatch: Boolean, method: String): Boolean =
+    conn.stdio && liveAtDispatch && !isReplaySafe(method)
+
+  /** The result of a call that reached a stdio child which then died: the
+    * action may or may not have been applied, and replaying it could apply it
+    * twice (upstream `outcome_uncertain`).
+    */
+  private def outcomeUncertainMsg(method: String): String =
+    s"MCP server '$serverName' exited while '$method' was in flight; " +
+      "the call may or may not have been applied, so it was not retried. " +
+      "Check the server's state before calling it again."
 
   private def isMethodNotFound(err: String): Boolean =
     val low = err.toLowerCase
@@ -264,6 +289,10 @@ final class McpServerHandle(
               current match
                 case Absent => Result.fail(transportDownMsg)
                 case Present(client) =>
+                  // Whether the transport was already down when we dispatched
+                  // decides if a retry can replay an action: a child that was
+                  // dead beforehand never saw the call.
+                  val liveAtDispatch = client.alive
                   client.request(method, params, timeout).map {
                     case Result.Success(v) =>
                       recordSuccess()
@@ -277,25 +306,35 @@ final class McpServerHandle(
                         park(err).andThen(Result.fail(err))
                       else if isReconnectable(err, client.alive) then
                         recordFailure()
-                        triggerReconnect().andThen(awaitReconnect(tuning.reconnectWait)).map {
-                          case false => Result.fail(transportDownMsg)
-                          case true =>
-                            // Respawned in time: retry the call once.
-                            current match
-                              case Absent => Result.fail(transportDownMsg)
-                              case Present(fresh) =>
-                                fresh.request(method, params, timeout).map {
-                                  case Result.Success(v) =>
-                                    recordSuccess()
-                                    Result.succeed(v)
-                                  case Result.Failure(e2) =>
-                                    recordFailure()
-                                    Result.fail(e2)
-                                  case Result.Panic(e2) =>
-                                    recordFailure()
-                                    Result.fail(String.valueOf(e2.getMessage))
-                                }
-                        }
+                        if inFlightDeath(client, liveAtDispatch, method) then
+                          // Reconnect for later calls, but never replay this
+                          // one (upstream #106546).
+                          triggerReconnect().andThen(Result.fail(outcomeUncertainMsg(method)))
+                        else
+                          triggerReconnect().andThen(awaitReconnect(tuning.reconnectWait)).map {
+                            case false => Result.fail(transportDownMsg)
+                            case true =>
+                              // Respawned in time: retry the call once.
+                              current match
+                                case Absent => Result.fail(transportDownMsg)
+                                case Present(fresh) =>
+                                  val freshLive = fresh.alive
+                                  fresh.request(method, params, timeout).map {
+                                    case Result.Success(v) =>
+                                      recordSuccess()
+                                      Result.succeed(v)
+                                    case Result.Failure(e2) =>
+                                      recordFailure()
+                                      // The one safe retry died mid-call too:
+                                      // same uncertainty, still no replay.
+                                      if inFlightDeath(fresh, freshLive, method) && isReconnectable(e2, fresh.alive)
+                                      then Result.fail(outcomeUncertainMsg(method))
+                                      else Result.fail(e2)
+                                    case Result.Panic(e2) =>
+                                      recordFailure()
+                                      Result.fail(String.valueOf(e2.getMessage))
+                                  }
+                          }
                       else
                         recordFailure()
                         Result.fail(err)
@@ -319,7 +358,7 @@ final class McpServerHandle(
     * before the session is declared dead and reconnected.
     */
   private def spawnKeepalive(): Unit < Sync =
-    if keepaliveRunning || closed then ()
+    if keepaliveRunning || closed || cfg.keepaliveIntervalSeconds <= 0.0 then ()
     else
       keepaliveRunning = true
       Fiber.initUnscoped {

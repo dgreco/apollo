@@ -46,6 +46,11 @@ final case class ToolContext(
     delegate: Maybe[DelegateRunner] = Absent,
     /** Searches past sessions; wired by the session layer. */
     sessionSearch: Maybe[(String, Int) => String < (Sync & Async)] = Absent,
+    /** False on background surfaces (the post-turn auto-review): such an agent
+      * may add to memory, never delete from it — no human is watching the turn
+      * that would drop the entry (upstream #106310).
+      */
+    memoryDeletesAllowed: Boolean = true,
     /** Analyzes an image with a vision model; wired by the agent layer. */
     vision: Maybe[VisionRunner] = Absent,
     interruptRequested: () => Boolean < Sync = () => false
