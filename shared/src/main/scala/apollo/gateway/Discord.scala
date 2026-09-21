@@ -363,8 +363,10 @@ object Discord:
     }
 
   /** One websocket session: hello → identify or resume → heartbeat fiber
-    * raced against the dispatch reader. Returns when the connection should
-    * be torn down (op 7/9, missed ack, or peer close).
+    * running alongside the dispatch reader. Returns when the connection
+    * should be torn down (op 7/9, missed ack, or peer close); the whole
+    * session runs inside a `Scope.run` so the heartbeat fiber is interrupted
+    * at that point rather than sleeping out its interval on a dead socket.
     */
   private def connection(
       ws: HttpWebSocket, token: String, config: ApolloConfig, hub: SessionHub, queue: Channel[Job]
@@ -409,7 +411,7 @@ object Discord:
           }
       }
 
-    def reader: Unit < (Sync & Async) =
+    def reader: Unit < (Sync & Async & Scope) =
       Abort.run[Closed](ws.take()).map {
         case Result.Success(HttpWebSocket.Payload.Text(text)) =>
           handleFrame(text).map(continue => if continue then reader else ws.close())
@@ -417,7 +419,7 @@ object Discord:
         case _                 => ()     // channel closed
       }
 
-    def handleFrame(text: String): Boolean < (Sync & Async) =
+    def handleFrame(text: String): Boolean < (Sync & Async & Scope) =
       Jx.parse(text) match
         case Result.Success(msg) =>
           (msg / "s").asLong match
@@ -429,7 +431,12 @@ object Discord:
             case 10L => // hello
               val interval = (msg / "d" / "heartbeat_interval").asLong.getOrElse(41250L)
               identifyOrResume
-                .andThen(Fiber.initUnscoped(
+                // Scoped, not unscoped: the session's Scope.run interrupts this
+                // fiber when the reader returns. An unscoped one outlives the
+                // connection — it sleeps out the full heartbeat interval first,
+                // which in tests means a fiber still waking up after the suite
+                // (and the sbt daemon's classloader) is gone.
+                .andThen(Fiber.init(
                   Async.sleep((interval * scala.util.Random.nextDouble()).toLong.millis)
                     .andThen(heartbeats(interval))
                 ).unit)
@@ -452,7 +459,7 @@ object Discord:
         case _ => true
     end handleFrame
 
-    reader
+    Scope.run(reader)
   end connection
 
   // --- dispatch ------------------------------------------------------------
