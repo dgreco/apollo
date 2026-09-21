@@ -126,9 +126,14 @@ native:link-and-test:
     # (job 498) this link discovers 25091 vs 25092 classes and 51779 vs 51783
     # methods after optimization. It is the runner's memory.
     #
-    #  * -Xmx4G     - .jvmopts asks for 8G, which suits a dev machine, not this
-    #                 host. On its own this only got the build one step further
-    #                 (to "Produced 151 LLVM IR files"), so it is not enough.
+    #  * -Xmx2G     - .jvmopts asks for 8G, which suits a dev machine, not this
+    #                 host. Measured on the runner (job 1106): 11Gi RAM with
+    #                 6.7Gi ALREADY in use and 3.2Gi of the 3.8Gi swap consumed
+    #                 before the build starts, leaving ~4.9Gi available. At the
+    #                 failure swap was at 3.8Gi/3.8Gi - fully exhausted - so the
+    #                 OOM killer takes the sbt server. 4G left no room for clang
+    #                 on top; 2G plus two clangs fits what is actually free.
+    #                 Disk is NOT a factor: 32G free, and flat across the build.
     #  * ActiveProcessorCount - the actual fix. Build$ sizes its compile pool
     #                 with Executors.newFixedThreadPool(availableProcessors),
     #                 one clang per IR file, so on a many-core host ~151 files
@@ -136,7 +141,7 @@ native:link-and-test:
     #                 exposes no parallelism knob in 0.5.12, but capping the
     #                 JVM's view of the CPU count caps the pool. Slower codegen
     #                 (27s at full width in job 498), which CI can afford.
-    - printf '%s\n' "-Xmx4G" "-XX:ActiveProcessorCount=2" > .jvmopts
+    - printf '%s\n' "-Xmx2G" "-XX:ActiveProcessorCount=2" > .jvmopts
     # TEMPORARY DIAGNOSTICS - remove once the native failure is understood.
     # Two throttling attempts (heap, then codegen parallelism) did not fix it,
     # so stop inferring and measure. Printing disk as well as memory: the
