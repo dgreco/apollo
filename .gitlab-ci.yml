@@ -11,11 +11,18 @@
 #  * JDK 25+ is REQUIRED, not just recommended: kyo 1.0.0-RC6's macro artifacts
 #    are compiled for Java 25 (class file version 69) and macros run at COMPILE
 #    time, so JDK 21 dies with UnsupportedClassVersionError. Hence temurin-25.
-#  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test job
-#    uses `testOnly *` to force a full run.
-#  * The native link step is memory-hungry (.jvmopts sets -Xmx8G); it runs on
-#    every pipeline as a hard gate, so a Native-only regression fails CI. It
-#    needs liburing-dev on the runner (kyo-net's io_uring backend links -luring).
+#  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test jobs
+#    use `testOnly *` to force a full run.
+#  * Every test job asserts a NON-ZERO test count. sbt 2's ActionCache can serve
+#    an empty `Test/compile` output, which links a test binary containing no test
+#    classes: the run then prints `Passed: Total 0, Failed 0` and `[success]` and
+#    looks green while having executed nothing. That was the real state of the
+#    Native suite locally in Sept 2026, so the guard is not theoretical.
+#  * The native job is memory-hungry (.jvmopts sets -Xmx8G); it runs on every
+#    pipeline as a hard gate, so a Native-only regression fails CI. It needs
+#    liburing-dev on the runner (kyo-net's io_uring backend links -luring). It
+#    links the binary AND runs the Native suite in one sbt invocation so both
+#    share a single compile.
 
 stages:
   - build
@@ -67,7 +74,10 @@ test:jvm:
   needs: ["compile"]
   script:
     # Bare `test` == testQuick; `testOnly *` forces the whole suite to run.
-    - sbt "agentJVM/testOnly *"
+    - sbt "agentJVM/testOnly *" 2>&1 | tee jvm-test.log
+    # tee masks sbt's exit code, so the guard asserts on the log instead - sbt
+    # must have succeeded AND run a non-zero number of tests (see header note).
+    - ci/assert-tests-ran.sh jvm-test.log
 
 # --- integration: docker compose under Docker-in-Docker -----------------------
 
@@ -95,12 +105,15 @@ integration:compose:
 
 # --- native binary (heavy toolchain) ------------------------------------------
 
-native:link:
+native:link-and-test:
   extends: .sbt
   stage: native
   # A hard parity gate: the Native binary is built and linked on every pipeline,
   # so a Native-only break (io_uring/OpenSSL linkage, a non-portable API) fails
-  # CI instead of surfacing later. Memory-hungry (.jvmopts sets -Xmx8G).
+  # CI instead of surfacing later. It also runs the Native test suite — linking
+  # alone proves the code compiles and links, not that it behaves, and Native is
+  # a first-class target. Both commands run in one sbt invocation so the Native
+  # compile is paid once. Memory-hungry (.jvmopts sets -Xmx8G).
   before_script:
     # Scala Native links a C/LLVM toolchain plus three native libraries:
     #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
@@ -112,7 +125,13 @@ native:link:
     - apt-get update -qq
     - apt-get install -y -qq clang llvm libstdc++-11-dev zlib1g-dev libssl-dev liburing-dev
   script:
-    - sbt agentNative/nativeLink
+    # One quoted string with `;` — sbt 2.0.8 CONCATENATES separate argument
+    # strings into a single command line instead of running them in sequence,
+    # so `sbt cmd1 "cmd2"` would silently never run cmd2.
+    - sbt "agentNative/nativeLink; agentNative/testOnly *" 2>&1 | tee native-test.log
+    # tee masks sbt's exit code, so the guard asserts on the log instead. A
+    # vacuous Native run reports "Total 0" and still exits green - see header.
+    - ci/assert-tests-ran.sh native-test.log
   artifacts:
     paths:
       - target/out/native0.5/scala-3.9.0/apollo/apollo
