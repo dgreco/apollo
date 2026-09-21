@@ -115,18 +115,28 @@ native:link-and-test:
   # a first-class target. Both commands run in one sbt invocation so the Native
   # compile is paid once. Memory-hungry (.jvmopts sets -Xmx8G).
   before_script:
-    # Cap the sbt heap for CI only. .jvmopts asks for -Xmx8G, which suits a dev
-    # machine but not this runner: the build dies entering codegen, right after
-    # "Optimizing (debug mode)", where Scala Native forks ~150 parallel clang
-    # processes to compile the LLVM IR files. An 8G heap plus that fan-out
-    # exhausts the host, and sbt goes down mid-link with "sbt server
-    # disconnected" (job 1091) or stops reporting entirely until GitLab fails it
-    # with no_updates_running (job 1077). The Native workload itself is NOT the
-    # cause - class counts are identical to the last green run (job 498):
-    # 25091 vs 25092 classes, 51779 vs 51783 methods after optimization.
-    # Scala Native 0.5.12 exposes no compilation-parallelism knob, so the heap
-    # is the lever. The working copy is a throwaway clone; local dev keeps 8G.
-    - echo "-Xmx4G" > .jvmopts
+    # Throttle the build for CI only; the working copy is a throwaway clone and
+    # local dev keeps .jvmopts as it is. The Native link kept killing the host
+    # in codegen - the phase after "Optimizing (debug mode)" where Scala Native
+    # compiles the LLVM IR files - taking sbt down with it ("sbt server
+    # disconnected", jobs 1091/1095) or freezing the runner until GitLab failed
+    # the job with no_updates_running (job 1077).
+    #
+    # The Native workload is NOT what regressed: against the last green run
+    # (job 498) this link discovers 25091 vs 25092 classes and 51779 vs 51783
+    # methods after optimization. It is the runner's memory.
+    #
+    #  * -Xmx4G     - .jvmopts asks for 8G, which suits a dev machine, not this
+    #                 host. On its own this only got the build one step further
+    #                 (to "Produced 151 LLVM IR files"), so it is not enough.
+    #  * ActiveProcessorCount - the actual fix. Build$ sizes its compile pool
+    #                 with Executors.newFixedThreadPool(availableProcessors),
+    #                 one clang per IR file, so on a many-core host ~151 files
+    #                 fan out far past what the RAM can back. NativeConfig
+    #                 exposes no parallelism knob in 0.5.12, but capping the
+    #                 JVM's view of the CPU count caps the pool. Slower codegen
+    #                 (27s at full width in job 498), which CI can afford.
+    - printf '%s\n' "-Xmx4G" "-XX:ActiveProcessorCount=2" > .jvmopts
     # Scala Native links a C/LLVM toolchain plus three native libraries:
     #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
     #  * liburing-dev   — kyo-net statically links -luring (-Wl,-Bstatic -luring)
