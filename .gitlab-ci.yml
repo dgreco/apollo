@@ -147,19 +147,6 @@ native:link-and-test:
     #                 JVM's view of the CPU count caps the pool. Slower codegen
     #                 (27s at full width in job 498), which CI can afford.
     - printf '%s\n' "-Xmx3G" "-XX:ActiveProcessorCount=1" > .jvmopts
-    # TEMPORARY DIAGNOSTICS - remove once the native failure is understood.
-    # Two throttling attempts (heap, then codegen parallelism) did not fix it,
-    # so stop inferring and measure. Printing disk as well as memory: the
-    # caches and target dirs grow every pipeline, which fits a failure that
-    # appeared between two builds of near-identical size and gets worse over
-    # time. Also dumps the sbt server's real JVM args, since sbt 2 starts the
-    # server as a SEPARATE background process and it is unverified that
-    # .jvmopts above reaches it at all.
-    - echo "=== nproc ==="; nproc
-    - echo "=== free ==="; free -h || true
-    - echo "=== df ==="; df -h / /builds || true
-    - echo "=== cgroup limits ==="; cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.high 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
-    - echo "=== .jvmopts ==="; cat .jvmopts
     # Scala Native links a C/LLVM toolchain plus three native libraries:
     #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
     #  * liburing-dev   — kyo-net statically links -luring (-Wl,-Bstatic -luring)
@@ -173,10 +160,10 @@ native:link-and-test:
     # One quoted string with `;` — sbt 2.0.8 CONCATENATES separate argument
     # strings into a single command line instead of running them in sequence,
     # so `sbt cmd1 "cmd2"` would silently never run cmd2.
-    # TEMPORARY: report the sbt server's actual JVM args, and the disk/memory
-    # state after the build, whether or not it survived.
-    - (sleep 45; echo "=== sbt server JVM args ==="; ps -eo rss,args 2>/dev/null | grep -i "[s]bt\|[j]ava" | head -5) &
-    - sbt "agentNative/nativeLink; agentNative/testOnly *" 2>&1 | tee native-test.log || { echo "=== post-mortem df ==="; df -h / /builds; echo "=== post-mortem free ==="; free -h; exit 1; }
+    # On failure, print the memory state: the heap below is sized to a narrow
+    # window on this runner, so "how much was actually free" is the first thing
+    # anyone debugging a future failure here will want.
+    - sbt "agentNative/nativeLink; agentNative/testOnly *" 2>&1 | tee native-test.log || { echo "=== memory at failure ==="; free -h; exit 1; }
     # tee masks sbt's exit code, so the guard asserts on the log instead. A
     # vacuous Native run reports "Total 0" and still exits green - see header.
     - ci/assert-tests-ran.sh native-test.log
