@@ -92,4 +92,47 @@ class ApprovalPolicySuite extends munit.FunSuite:
     assertEquals(svc.currentApprovalMode, "off")
     assert(run(svc.check(dangerous, NeverPromptUi)).isSuccess)
   }
+
+  // --- protected instruction files -----------------------------------------
+
+  private def p(s: String) = java.nio.file.Paths.get(s)
+
+  test("an instruction-file write asks even under yolo, and off-list writes don't") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = true)
+    assert(svc.yoloEnabled)
+    // Yolo does NOT bypass this gate: the denying UI is reached.
+    val denied = run(svc.checkInstructionWrite(List(p("/w/CLAUDE.md")), DenyingUi))
+    assert(denied.isFailure, denied.toString)
+    assert(denied.failure.getOrElse("").contains("protected instruction file"), denied.toString)
+    // An ordinary file never prompts.
+    assert(run(svc.checkInstructionWrite(List(p("/w/notes.md")), NeverPromptUi)).isSuccess)
+  }
+
+  test("the default basenames match case-insensitively; one hit gates the whole edit") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "cli", oneShot = false, yoloFlag = false)
+    List("AGENTS.md", "agents.md", "Claude.md", "SOUL.md", ".cursorrules").foreach { name =>
+      assertEquals(svc.protectedInstructionHit(List(p(s"/w/$name"))).isEmpty, false, name)
+    }
+    assertEquals(svc.protectedInstructionHit(List(p("/w/a.txt"), p("/w/AGENTS.md"))), Present("AGENTS.md"))
+    assertEquals(svc.protectedInstructionHit(List(p("/w/a.txt"))), Absent)
+  }
+
+  test("extra patterns are fnmatch globs on the basename; the gate can be turned off") {
+    val extra = config("approvals: {protected_instruction_extra_patterns: [\"*.mdc\"]}")
+    val onSvc = new ApprovalService(extra, extra.paths, "cli", oneShot = false, yoloFlag = false)
+    assertEquals(onSvc.protectedInstructionHit(List(p("/w/rules.mdc"))), Present("rules.mdc"))
+
+    val off = config("approvals: {protected_instruction_files: false}")
+    val offSvc = new ApprovalService(off, off.paths, "cli", oneShot = false, yoloFlag = false)
+    assertEquals(offSvc.protectedInstructionHit(List(p("/w/CLAUDE.md"))), Absent)
+    assert(run(offSvc.checkInstructionWrite(List(p("/w/CLAUDE.md")), NeverPromptUi)).isSuccess)
+  }
+
+  test("an unattended surface refuses an instruction-file write (nobody can answer)") {
+    val cfg = config("")
+    val svc = new ApprovalService(cfg, cfg.paths, "gateway", oneShot = false, yoloFlag = false)
+    assert(run(svc.checkInstructionWrite(List(p("/w/SOUL.md")), UnattendedToolUi)).isFailure)
+  }
 end ApprovalPolicySuite

@@ -105,7 +105,12 @@ object MemoryTool:
               case Absent =>
                 List(((args / "action").asStr.getOrElse("add"), (args / "content").asStr,
                       (args / "old_text").asStr, (args / "new_text").asStr.orElse((args / "content").asStr)))
-          Fs.readString(file).map { current =>
+          if !ctx.memoryDeletesAllowed && ops.exists(_._1 == "remove") then
+            ToolOutcome.Error(
+              "a background review may add to or amend memory, but not remove entries; " +
+                "raise the removal with the user in a normal turn instead."
+            )
+          else Fs.readString(file).map { current =>
             applyOps(current.getOrElse(""), ops) match
               case Result.Failure(err) => ToolOutcome.Error(err)
               case Result.Success(updated) =>

@@ -21,6 +21,10 @@ final case class CronJob(
     enabled: Boolean,
     state: String, // scheduled | paused | completed | running
     nextRunAt: Maybe[Double],
+    /** Set by a manual `trigger`: run once at the next tick WITHOUT touching
+      * `nextRunAt`, so an off-tick run never cancels the scheduled one.
+      */
+    runRequestedAt: Maybe[Double],
     lastRunAt: Maybe[Double],
     lastStatus: Maybe[String],
     deliver: Maybe[String],
@@ -168,6 +172,7 @@ final class CronStore(paths: ApolloPaths):
         enabled = (v / "enabled").asBool.getOrElse(true),
         state = (v / "state").asStr.getOrElse("scheduled"),
         nextRunAt = (v / "next_run_at").asDouble,
+        runRequestedAt = (v / "run_requested_at").asDouble,
         lastRunAt = (v / "last_run_at").asDouble,
         lastStatus = (v / "last_status").asStr,
         deliver = (v / "deliver").asStr,
@@ -189,6 +194,8 @@ final class CronStore(paths: ApolloPaths):
         "enabled"     -> Present(Jx.bool(j.enabled)),
         "state"       -> Present(Jx.str(j.state)),
         "next_run_at" -> j.nextRunAt.map(Jx.num),
+        // Always written, so clearing the flag survives the raw-record overlay.
+        "run_requested_at" -> Present(j.runRequestedAt.map(Jx.num).getOrElse(Jx.nul)),
         "last_run_at" -> j.lastRunAt.map(Jx.num),
         "last_status" -> j.lastStatus.map(Jx.str),
         "deliver"     -> j.deliver.map(Jx.str)

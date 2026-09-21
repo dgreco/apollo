@@ -20,8 +20,10 @@ class McpReliabilitySuite extends munit.FunSuite:
   private final class FakeConn(val serverName: String) extends McpConnection:
     val calls = new java.util.concurrent.ConcurrentLinkedQueue[String]()
     @volatile var aliveFlag                                  = true
+    @volatile var stdioFlag                                  = true
     @volatile var responder: String => Result[String, Value] = _ => Result.succeed(Jx.obj())
     def alive: Boolean          = aliveFlag
+    def stdio: Boolean          = stdioFlag
     def initializeResult: Value = Jx.obj()
     def request(m: String, p: Maybe[Value], t: Maybe[Duration]): Result[String, Value] < (Sync & Async) =
       Sync.defer {
@@ -108,6 +110,66 @@ class McpReliabilitySuite extends munit.FunSuite:
     assertEquals(openCount.get(), 2)
     import scala.jdk.CollectionConverters.*
     assert(states.asScala.exists(_ == McpManager.State.Reconnecting), states.asScala.toList)
+  }
+
+  /** Upstream #106546: the child was alive when the call was dispatched, so
+    * the action may already have been applied — reconnect, but do not replay.
+    */
+  test("stdio death mid-call: an in-flight tools/call is not replayed") {
+    val conn1 = new FakeConn("srv")
+    val conn2 = new FakeConn("srv")
+    conn2.responder = _ => Result.succeed(Jx.obj("via" -> Jx.str("conn2")))
+    val openCount = new java.util.concurrent.atomic.AtomicInteger(0)
+    val (handle, _) = mkHandle(cfg("srv"), McpTuning(backoffBase = 10.millis), () =>
+      if openCount.incrementAndGet() == 1 then Result.succeed(conn1) else Result.succeed(conn2)
+    )
+    run(handle.start())
+    conn1.responder = _ =>
+      conn1.aliveFlag = false // dies *after* dispatch
+      Result.fail("MCP server 'srv': write failed (Broken pipe)")
+
+    val msg = run(handle.request("tools/call", Absent, Absent)).failure.getOrElse("")
+    assert(msg.contains("may or may not have been applied"), msg)
+    assert(conn2.calls.isEmpty, s"the call was replayed: ${conn2.calls}")
+    // The transport is still rebuilt for later calls.
+    eventually()(openCount.get() == 2)
+  }
+
+  test("stdio death mid-call: a read-only method is still retried once") {
+    val conn1 = new FakeConn("srv")
+    val conn2 = new FakeConn("srv")
+    conn2.responder = _ => Result.succeed(Jx.obj("via" -> Jx.str("conn2")))
+    val openCount = new java.util.concurrent.atomic.AtomicInteger(0)
+    val (handle, _) = mkHandle(cfg("srv"), McpTuning(backoffBase = 10.millis), () =>
+      if openCount.incrementAndGet() == 1 then Result.succeed(conn1) else Result.succeed(conn2)
+    )
+    run(handle.start())
+    conn1.responder = _ =>
+      conn1.aliveFlag = false
+      Result.fail("MCP server 'srv': write failed (Broken pipe)")
+
+    val r = run(handle.request("tools/list", Absent, Absent))
+    assertEquals(r.getOrElse(Jx.obj()).field("via").asStr, Present("conn2"))
+  }
+
+  test("an HTTP server keeps its retry when a call dies in flight") {
+    val conn1 = new FakeConn("srv")
+    val conn2 = new FakeConn("srv")
+    conn1.stdioFlag = false
+    conn2.stdioFlag = false
+    conn2.responder = _ => Result.succeed(Jx.obj("via" -> Jx.str("conn2")))
+    val openCount = new java.util.concurrent.atomic.AtomicInteger(0)
+    val httpCfg = cfg("srv").copy(command = Absent, url = Present("https://example.test/mcp"))
+    val (handle, _) = mkHandle(httpCfg, McpTuning(backoffBase = 10.millis), () =>
+      if openCount.incrementAndGet() == 1 then Result.succeed(conn1) else Result.succeed(conn2)
+    )
+    run(handle.start())
+    conn1.responder = _ =>
+      conn1.aliveFlag = false
+      Result.fail("MCP server 'srv': session expired")
+
+    val r = run(handle.request("tools/call", Absent, Absent))
+    assertEquals(r.getOrElse(Jx.obj()).field("via").asStr, Present("conn2"))
   }
 
   test("reconnect budget exhaustion parks; self-probe revives") {

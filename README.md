@@ -136,8 +136,8 @@ REPL slash commands (type `/help` in-session for the full list):
 
 | | |
 |---|---|
-| **Session** | `/status` · `/history` (model, message count, token usage, context %), `/usage`, `/config`, `/profile`, `/reset` · `/new`, `/clear`, `/redraw`, `/title <name>`, `/compress` · `/compact` (force compaction), `/save [file.md]`, `/prompt` · `/compose` (multi-line), `/retry`, `/copy`, `/image <path>` (attach to next message), `/sessions`, `/resume <id\|latest>`, `/branch` · `/fork [name]` |
-| **Model** | `/model [name]`, `/reasoning <level>`, `/reasoning-display`, `/verbose`, `/version` · `/v`, `/whoami` |
+| **Session** | `/status` (model, message count, token usage, context %), `/history` (the conversation so far), `/usage`, `/config`, `/profile`, `/reset` · `/new`, `/clear`, `/redraw`, `/title <name>`, `/compress` · `/compact` (force compaction), `/save [file.md]`, `/prompt` · `/compose` (multi-line), `/retry`, `/copy`, `/image <path>` (attach to next message), `/sessions`, `/resume <id\|latest>`, `/branch` · `/fork [name]` |
+| **Model** | `/model [name]`, `/reasoning <level\|show\|hide>` (alias `/reasoning-display`), `/verbose`, `/version` · `/v`, `/whoami` |
 | **Work** | `/plan <task>`, `/init [notes]` (write AGENTS.md), `/diff [args]`, `/loop <prompt> [--times N] [--every S]`, `/bg <prompt>` (background session), `/agents` · `/tasks`, `/stop [id]`, `/review [focus]` (independent subagent review), `/goal [text\|show\|clear]` (standing objective), `/queue [prompt\|clear]`, `/moa <prompt>` (mixture-of-agents), `/learn <what>` (capture a skill), `/heartbeat` · `/hb [every <interval> <prompt>\|status\|pause\|resume\|clear]` (recurring idle prompt), `/steer <message>` (inject after the next tool call), `/worktree [list\|new [name]\|prune]`, `/snapshot [create\|list\|restore <id>\|prune]`, `/rollback [list\|create\|<number>]` (git working-tree checkpoints), `/blueprint` · `/bp [name [k=v…]]` (cron job from a template), `/kanban [show\|add\|move\|rm]` (local board), `/curator [status\|archive\|restore]` (skill maintenance), `/handoff <telegram\|discord\|slack>` (continue this session via a running gateway bot) |
 | **Tools & services** | `/tools`, `/skills`, `/reload-skills`, `/mcp` (server status + tools), `/cron` (scheduled jobs), `/memory` |
 | **Approvals** | `/yolo` (toggle bypass), `/approvals [manual\|off]` |
@@ -316,6 +316,12 @@ patterns and `approvals.deny` globs are blocked even under `--yolo`; otherwise
 you get an interactive once/session/always/deny prompt (bounded by
 `approvals.timeout`). Unattended contexts (cron, webhook, `-q` quiet, `-z`
 one-shot) follow their configured `approvals.*_mode`.
+
+Writes to files that steer the agent itself — `AGENTS.md`, `CLAUDE.md`,
+`SOUL.md`, `.cursorrules`, plus any `approvals.protected_instruction_extra_patterns`
+glob — always ask a human, **even under `--yolo`**, and are refused where nobody
+can answer. Set `approvals.protected_instruction_files: false` to turn the gate
+off.
 
 The `terminal` tool runs on the backend chosen by `terminal.backend`:
 

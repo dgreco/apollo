@@ -38,6 +38,7 @@ final class McpHttpClient private (
 
   def initializeResult: Value = initResult
   def alive: Boolean          = deadReason.isEmpty
+  def stdio: Boolean          = false
 
   def request(
       method: String,

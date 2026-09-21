@@ -142,6 +142,21 @@ class McpConfigSuite extends munit.FunSuite:
     assertEquals(tuned.untrusted, true)
   }
 
+  test("keepalive: off by default for stdio, 180s for http, explicit opts in") {
+    val (servers, _) = McpConfig.load(config(
+      """mcp_servers:
+        |  child: {command: uvx}
+        |  remote: {url: "https://mcp.example.com/mcp"}
+        |  chatty: {command: uvx, keepalive_interval: 15}
+        |  floored: {command: uvx, keepalive_interval: 1}
+        |""".stripMargin), ws)
+    val byName = servers.map(s => s.name -> s.keepaliveIntervalSeconds).toMap
+    assertEquals(byName("child"), 0.0)    // stdio: the pipe already reports death
+    assertEquals(byName("remote"), 180.0) // http: sessions expire, so ping
+    assertEquals(byName("chatty"), 15.0)
+    assertEquals(byName("floored"), 5.0)  // still floored at 5s
+  }
+
   test("enabled bool-ish, disabled entries dropped, url selects http") {
     val (servers, _) = McpConfig.load(config(
       """mcp_servers:

@@ -211,6 +211,15 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def approvalTimeoutSeconds: Int = at("approvals", "timeout").flatMap(_.int).getOrElse(300)
   def approvalDenyGlobs: List[String] =
     at("approvals", "deny").flatMap(_.strings).getOrElse(Nil)
+  /** Writes to files that steer the agent itself (AGENTS.md, CLAUDE.md, …)
+    * ask a human even under yolo. Extra patterns are fnmatch globs on the
+    * basename.
+    */
+  def protectedInstructionFiles: Boolean =
+    at("approvals", "protected_instruction_files").flatMap(_.bool).getOrElse(true)
+  def protectedInstructionExtraPatterns: List[String] =
+    at("approvals", "protected_instruction_extra_patterns").flatMap(_.strings).getOrElse(Nil)
+
   def unattendedApprovalMode: String = strAt("approvals", "unattended_mode").getOrElse("deny")
   def cronApprovalMode: String       = strAt("approvals", "cron_mode").getOrElse("deny")
   def singleQueryApprovalMode: String = strAt("approvals", "single_query_mode").getOrElse("deny")
@@ -279,6 +288,17 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
 
   def compressionEnabled: Boolean   = at("compression", "enabled").flatMap(_.bool).getOrElse(true)
   def compressionThreshold: Double  = at("compression", "threshold").flatMap(_.double).getOrElse(0.5)
+
+  /** Absolute token cap on the compression trigger: compression fires at the
+    * LOWER of this and the ratio threshold, so a huge context window can't
+    * defer it indefinitely. Unset = the upstream default (256000); an explicit
+    * `threshold_tokens: null` restores ratio-only behaviour.
+    */
+  def compressionThresholdTokens: Maybe[Long] =
+    at("compression", "threshold_tokens") match
+      case Absent       => Present(256_000L)
+      case Present(n)   => n.long.filter(_ > 0L)
+
   def protectFirstN: Int            = at("compression", "protect_first_n").flatMap(_.int).getOrElse(3)
   def protectLastN: Int             = at("compression", "protect_last_n").flatMap(_.int).getOrElse(20)
   def minTailUserMessages: Int      = at("compression", "min_tail_user_messages").flatMap(_.int).getOrElse(1)
@@ -309,7 +329,9 @@ final case class ApolloConfig(root: Maybe[Node], env: EnvChain, paths: ApolloPat
   def displayInterface: String  = strAt("display", "interface").getOrElse("cli")
   def displayCompact: Boolean   = at("display", "compact").flatMap(_.bool).getOrElse(false)
   def displayStreaming: Boolean = at("display", "streaming").flatMap(_.bool).getOrElse(true)
-  def showReasoning: Boolean    = at("display", "show_reasoning").flatMap(_.bool).getOrElse(false)
+  // Upstream flipped this default to true in 0.21.x: thinking is shown unless
+  // the user turns it off (`/reasoning hide`, or display.show_reasoning).
+  def showReasoning: Boolean    = at("display", "show_reasoning").flatMap(_.bool).getOrElse(true)
   def toolProgress: String      = strAt("display", "tool_progress").getOrElse("all")
   /** Opt-in concurrent-input REPL (`display.async_input`): turns run on a fiber
     * while the prompt stays live for /steer, /stop, /queue. JVM/JLine only. */

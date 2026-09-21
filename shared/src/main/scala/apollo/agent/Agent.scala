@@ -439,7 +439,8 @@ final class Agent(
     val forced        = forceCompress
     forceCompress     = false // consumed once, whether or not we act on it
     val contextLength = runtime.contextLength.getOrElse(200_000)
-    val threshold     = (config.compressionThreshold * contextLength).toLong
+    val threshold     = Compression.triggerAt(
+      contextLength, config.compressionThreshold, config.compressionThresholdTokens)
     val due           = config.compressionEnabled && lastPromptTokens >= threshold
     // `/compress` (forced) overrides the threshold and the enabled flag, but we
     // still need enough history for a summary to be worthwhile.

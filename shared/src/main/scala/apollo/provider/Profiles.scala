@@ -51,11 +51,16 @@ object Profiles:
       keyEnvVars = List("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
       reasoningStyle = AnthropicNative,
       supportsVision = true,
-      defaultAuxModel = "claude-haiku-4-5-20251001",
+      defaultAuxModel = "claude-haiku-4-5",
+      // Native-API ids, current generation first (head = the default when no
+      // model is configured). Exact strings — these ids carry no date suffix.
       staticModels = List(
+        "claude-opus-5",
+        "claude-fable-5-1",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
         "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5-20251001"
+        "claude-sonnet-4-6"
       )
     ),
     Profile(

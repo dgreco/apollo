@@ -91,6 +91,16 @@ final class ApprovalService(
         case ApprovalDecision.Deny =>
           Result.fail("command denied by the user. Do not retry it; adjust your approach or ask.")
       }
+    bounded(ask, "command auto-denied")
+  end interactiveApproval
+
+  /** Bounds a human prompt by `approvals.timeout` (≤0 = wait forever); an
+    * unanswered prompt auto-denies so an agent can't hang on an absent
+    * operator.
+    */
+  private def bounded(
+      ask: Result[String, Unit] < (Sync & Async), onTimeout: String
+  ): Result[String, Unit] < (Sync & Async) =
     val timeout = config.approvalTimeoutSeconds
     if timeout <= 0 then ask
     else
@@ -98,9 +108,49 @@ final class ApprovalService(
         case Result.Success(r) => r
         case _ =>
           Result.fail(s"approval prompt timed out after ${timeout}s (approvals.timeout); " +
-            "command auto-denied. Do not retry it.")
+            s"$onTimeout. Do not retry it.")
       }
-  end interactiveApproval
+
+  // --- protected instruction files ----------------------------------------
+
+  /** The upstream default set (`_PROTECTED_INSTRUCTION_BASENAMES`), matched
+    * case-insensitively on the basename.
+    */
+  private val protectedInstructionBasenames =
+    Set("agents.md", "claude.md", "soul.md", ".cursorrules")
+
+  /** The first path that steers the agent itself, if any. */
+  private[tools] def protectedInstructionHit(paths: List[java.nio.file.Path]): Maybe[String] =
+    if !config.protectedInstructionFiles then Absent
+    else
+      val extra = config.protectedInstructionExtraPatterns.map(Detection.fnmatch)
+      Maybe.fromOption(paths.map(p => Option(p.getFileName).fold("")(_.toString)).find { base =>
+        val low = base.toLowerCase
+        protectedInstructionBasenames.contains(low) || extra.exists(_.matches(base))
+      })
+
+  /** Gates a write touching an instruction file the agent would be steered by.
+    * Asks a human EVERY time — the decision is deliberately never memoized,
+    * and yolo does not bypass it — so an unattended surface (whose `ToolUi`
+    * denies) refuses the write. One protected path gates the whole edit.
+    */
+  def checkInstructionWrite(
+      paths: List[java.nio.file.Path], ui: ToolUi
+  ): Result[String, Unit] < (Sync & Async) =
+    protectedInstructionHit(paths) match
+      case Absent => Result.succeed(())
+      case Present(name) =>
+        val ask: Result[String, Unit] < (Sync & Async) =
+          ui.requestApproval(
+            s"Allow writing to '$name'? It steers the agent's own behaviour."
+          ).map {
+            case ApprovalDecision.Deny =>
+              Result.fail(s"write to '$name' denied: it is a protected instruction file " +
+                "(approvals.protected_instruction_files). Ask the user to make this edit.")
+            case _ => Result.succeed(())
+          }
+        bounded(ask, s"write to '$name' auto-denied")
+  end checkInstructionWrite
 
   private def resolveUnattended(mode: String): Result[String, Unit] =
     if mode == "approve" then Result.succeed(())

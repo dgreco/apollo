@@ -22,6 +22,18 @@ object Compression:
   private val pruneMinChars = 200
   private val stub          = "[Old tool output cleared to save context space]"
 
+  /** Prompt-token count at which compression fires: the lower of the
+    * proportional trigger (`compression.threshold` × the window) and the
+    * absolute cap (`compression.threshold_tokens`), with the cap clamped to
+    * the window so a cap above it is a no-op. Mirrors upstream's
+    * first-fires-wins rule, which survives model switches and fallbacks.
+    */
+  def triggerAt(contextLength: Long, ratio: Double, capTokens: Maybe[Long]): Long =
+    val proportional = (ratio * contextLength).toLong
+    capTokens match
+      case Present(cap) => proportional.min(cap.min(contextLength))
+      case Absent       => proportional
+
   def pruneOldToolResults(messages: List[Message], protectLastN: Int): List[Message] =
     val cutoff = (messages.length - protectLastN).max(0)
     messages.zipWithIndex.map { (m, i) =>

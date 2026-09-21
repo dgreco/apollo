@@ -33,6 +33,37 @@ class AutoReviewSuite extends munit.FunSuite:
     assert(AutoReview.reviewInstruction(hasMemory = true, hasSkill = false).contains("memory"))
   }
 
+  test("a background review may add to memory but not remove from it") {
+    val home   = java.nio.file.Files.createTempDirectory("apollo-review-mem")
+    val paths  = ApolloPaths(home)
+    val config = ApolloConfig(Absent, EnvChain(Map.empty), paths)
+    import AllowUnsafe.embrace.danger
+    val todo = KyoApp.Unsafe.runAndBlock(10.seconds)(AtomicRef.init(List.empty[TodoItem])).getOrThrow
+    val live = ToolContext(
+      config = config, paths = paths, cwd = home, platform = "cli", sessionId = "s",
+      approvals = new ApprovalService(config, paths, "cli", oneShot = false, yoloFlag = true),
+      ui = apollo.tools.UnattendedToolUi, todo = todo,
+      skills = new apollo.skills.SkillStore(config, paths))
+    val review = live.copy(platform = "auto-review", memoryDeletesAllowed = false)
+
+    def call(ctx: ToolContext, json: String): (String, Boolean) =
+      KyoApp.Unsafe.runAndBlock(10.seconds)(ToolRegistry.dispatch("memory", json, ctx)).getOrThrow
+
+    val add = """{"target":"memory","action":"add","content":"keeper"}"""
+    assertEquals(call(review, add)._2, false)                       // saving is fine
+    val remove = """{"target":"memory","action":"remove","old_text":"keeper"}"""
+    val (msg, isErr) = call(review, remove)
+    assert(isErr, msg)
+    assert(msg.contains("not remove entries"), msg)
+    // Batched operations are gated the same way...
+    val batch = """{"target":"memory","operations":[{"action":"remove","old_text":"keeper"}]}"""
+    assert(call(review, batch)._2, "a batched remove slipped through")
+    // ...and a normal, human-watched turn still removes.
+    assertEquals(call(live, remove)._2, false)
+    val text = new String(java.nio.file.Files.readAllBytes(paths.memoryMd), "UTF-8")
+    assert(!text.contains("keeper"), s"remove did not apply in a live turn: $text")
+  }
+
   test("E2E: the reviewer calls the memory tool and writes MEMORY.md") {
     val callN = new java.util.concurrent.atomic.AtomicInteger(0)
     val memArgs = Jx.render(Jx.obj(

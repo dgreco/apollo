@@ -61,7 +61,9 @@ object AutoReview:
       Sync.defer(java.time.Instant.now()).map { now =>
         val id       = store.newSessionId(now)
         val flag     = new java.util.concurrent.atomic.AtomicBoolean(false)
-        val reviewCtx = ctx.copy(platform = "auto-review", sessionId = id, delegate = Absent)
+        // Nobody is watching this turn, so it may save but never delete.
+        val reviewCtx = ctx.copy(
+          platform = "auto-review", sessionId = id, delegate = Absent, memoryDeletesAllowed = false)
         val reviewer = new Agent(runtime, reviewCtx, store, id, Present(maxIterations), flag)
         reviewer.restore(history)
         val instruction = reviewInstruction(

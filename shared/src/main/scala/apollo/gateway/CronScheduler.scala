@@ -34,19 +34,25 @@ object CronScheduler:
       due   = jobs.filter(j =>
                 j.enabled && j.state == "scheduled" &&
                   j.nextRunAt.exists(_ <= now.getEpochSecond.toDouble))
-      _    <- if due.isEmpty then Sync.defer(())
+      // `trigger`ed jobs run off-tick. Their schedule is left alone, so a
+      // manual run never cancels the next scheduled one (upstream #106306) —
+      // and a paused job can still be run by hand.
+      triggered = jobs.filter(j => j.runRequestedAt.nonEmpty && !due.exists(_.id == j.id))
+      toRun     = due ++ triggered
+      _    <- if toRun.isEmpty then Sync.defer(())
               else
                 // Advance schedules BEFORE executing: at-most-once.
                 val advanced = jobs.map { j =>
-                  if !due.exists(_.id == j.id) then j
+                  val cleared = if j.runRequestedAt.nonEmpty then j.copy(runRequestedAt = Absent) else j
+                  if !due.exists(_.id == j.id) then cleared
                   else
                     // NB: fully qualified — `import kyo.*` shadows our Schedule.
-                    apollo.cron.Schedule.advance(j.scheduleKind, j.scheduleExpr, now) match
-                      case Present(nextAt) => j.copy(nextRunAt = Present(nextAt.getEpochSecond.toDouble))
-                      case Absent          => j.copy(state = "completed", nextRunAt = Absent)
+                    apollo.cron.Schedule.advance(cleared.scheduleKind, cleared.scheduleExpr, now) match
+                      case Present(nextAt) => cleared.copy(nextRunAt = Present(nextAt.getEpochSecond.toDouble))
+                      case Absent          => cleared.copy(state = "completed", nextRunAt = Absent)
                 }
                 store.save(advanced).andThen {
-                  Kyo.foreachDiscard(due)(job => runJob(config, paths, store, job, now))
+                  Kyo.foreachDiscard(toRun)(job => runJob(config, paths, store, job, now))
                 }
     yield ()
 
