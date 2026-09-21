@@ -115,6 +115,18 @@ native:link-and-test:
   # a first-class target. Both commands run in one sbt invocation so the Native
   # compile is paid once. Memory-hungry (.jvmopts sets -Xmx8G).
   before_script:
+    # Cap the sbt heap for CI only. .jvmopts asks for -Xmx8G, which suits a dev
+    # machine but not this runner: the build dies entering codegen, right after
+    # "Optimizing (debug mode)", where Scala Native forks ~150 parallel clang
+    # processes to compile the LLVM IR files. An 8G heap plus that fan-out
+    # exhausts the host, and sbt goes down mid-link with "sbt server
+    # disconnected" (job 1091) or stops reporting entirely until GitLab fails it
+    # with no_updates_running (job 1077). The Native workload itself is NOT the
+    # cause - class counts are identical to the last green run (job 498):
+    # 25091 vs 25092 classes, 51779 vs 51783 methods after optimization.
+    # Scala Native 0.5.12 exposes no compilation-parallelism knob, so the heap
+    # is the lever. The working copy is a throwaway clone; local dev keeps 8G.
+    - echo "-Xmx4G" > .jvmopts
     # Scala Native links a C/LLVM toolchain plus three native libraries:
     #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
     #  * liburing-dev   — kyo-net statically links -luring (-Wl,-Bstatic -luring)
