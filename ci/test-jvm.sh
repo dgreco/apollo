@@ -57,11 +57,12 @@ fi
 # Asserts a non-zero test count (see the script's own header for why).
 ci/assert-tests-ran.sh "$log"
 
-report_dir=$(dirname "$(find target/out/jvm -path '*/coverage-report/cobertura.xml' | head -1)")
-scoverage_dir=$(dirname "$(find target/out/jvm -path '*/scoverage-report/scoverage.xml' | head -1)")
-cp "$report_dir/cobertura.xml" coverage/cobertura.xml
-cp "$scoverage_dir/scoverage.xml" coverage/scoverage.xml
-cp -R "$scoverage_dir" coverage/html
+# sbt-scoverage writes its reports under coverageDataDir, i.e. this run's
+# $data_dir. Only look there: any other coverage-report/ under target/ is a
+# stale leftover from an earlier run.
+cp "$data_dir/coverage-report/cobertura.xml" coverage/cobertura.xml
+cp "$data_dir/scoverage-report/scoverage.xml" coverage/scoverage.xml
+cp -R "$data_dir/scoverage-report" coverage/html
 
 # scoverage prints "[info] Statement coverage.: 68.83%"; re-emit it without the
 # sbt prefix/colour so the forge-side regex is trivial.
