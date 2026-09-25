@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package apollo.cli
 
 /** The startup welcome screen — a gradient figlet title and a framed two-column

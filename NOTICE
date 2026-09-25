@@ -1,0 +1,14 @@
+apollo
+Copyright 2026 David Greco <greco@acm.org>
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+apollo is an independent, from-scratch Scala reimplementation of the Hermes
+agent harness (https://github.com/NousResearch/hermes-agent, MIT License,
+Copyright Nous Research). It is not an official Nous Research product.
+
+The test fixture shared/src/test/resources/cli-config.yaml.example is copied
+from Hermes and remains under the MIT License (see LICENSES/MIT.txt).
+
+CODE_OF_CONDUCT.md is adapted from the Contributor Covenant, version 2.1,
+licensed under CC BY 4.0 (see LICENSES/CC-BY-4.0.txt).

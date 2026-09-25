@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # apollo vs Hermes — Feature Parity
 
 A sourced map of where apollo stands against the upstream **NousResearch Hermes

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package apollo.cli
 
 /** Process-global registry of background REPL sessions started with `/bg`.
