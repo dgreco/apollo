@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Keeps the GitHub Actions pinned in .github/workflows up to date. Dependabot
+# has no sbt support; Scala dependencies are bumped by hand in build.sbt.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

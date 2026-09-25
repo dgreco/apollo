@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Licensing for files that cannot carry an SPDX header comment.
+# See https://reuse.software/spec-3.3/ — checked in CI by `reuse lint`.
+version = 1
+
+# Files with no comment syntax (JSON, the plain-text NOTICE), and .jvmopts,
+# whose lines the sbt launcher passes straight to the JVM.
+[[annotations]]
+path = ["NOTICE", ".jvmopts", "observability/grafana/dashboards/apollo.json"]
+SPDX-FileCopyrightText = "2026 David Greco <greco@acm.org>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The real Hermes `cli-config.yaml.example`, kept as-is as a test
+# fixture (ConfigSuite loads it to prove config compatibility).
+[[annotations]]
+path = "shared/src/test/resources/cli-config.yaml.example"
+SPDX-FileCopyrightText = "Nous Research"
+SPDX-License-Identifier = "MIT"

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package apollo.util
 
 /** JVM-only: cross-validate the portable SHA-256 against the platform's own

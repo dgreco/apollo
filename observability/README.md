@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Local observability stack
 
 A one-command OpenTelemetry backend to watch apollo's traces, metrics, and logs

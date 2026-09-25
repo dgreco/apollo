@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Prometheus scrapes the OTel Collector's Prometheus exporter, where apollo's
 # OTLP metrics are re-exposed.
 

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Feature request
+description: Suggest a feature or a Hermes behaviour apollo lacks
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that apollo does not support?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How it should work. If Hermes already does this, link the relevant Hermes code or docs.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # apollo — Architecture
 
 This document describes apollo's architecture using the [C4 model](https://c4model.com/)

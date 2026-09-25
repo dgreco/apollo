@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Bug report
+description: Something apollo does wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what apollo did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal config (redact secrets!), command line, and prompt.
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Build
+      options: [JVM, Native, Both, Not sure]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: v0.1.0 or git SHA
+  - type: input
+    id: env
+    attributes:
+      label: OS, JDK, provider/model
+      placeholder: macOS 15 arm64, JDK 25, anthropic/claude-sonnet-5
+  - type: textarea
+    id: hermes
+    attributes:
+      label: Hermes behaviour (if different)
+      description: apollo mirrors Hermes. If Hermes behaves differently here, describe how.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: text

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # REPL Slash-Command Parity — Status & Resume Point
 
 Snapshot of the effort to bring apollo's interactive REPL slash commands toward
