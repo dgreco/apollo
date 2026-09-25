@@ -10,12 +10,14 @@
 # removing a job. See .gitlab-ci.yml for the notes on the JDK and the
 # non-zero-test-count guard.
 #
-# Pipeline: license (REUSE) → compile (JVM) → test (JVM + coverage) →
-# integration (docker compose) → native (link + test) →
-# on a v* tag: package (assembly jar) → release (jar + native binary).
+# Pipeline: license (REUSE) + README sync → compile (JVM) → test (JVM +
+# coverage) → integration (docker compose) → native (link + test) → on main:
+# coverage report → on a v* tag: package (assembly jar) → release (jar + native
+# binary).
 #
-# The one GitHub-only job is `coverage`, which uploads the Cobertura report to
-# Codecov for the README badge (GitLab renders its own badge from the test job).
+# The coverage report is the one deliberate difference between the forges: each
+# publishes where its own badge links (GitHub: `coverage-pages`, the HTML report
+# on GitHub Pages; GitLab: `coverage-wiki`, a wiki page).
 
 name: CI
 
@@ -24,6 +26,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,10 +50,18 @@ jobs:
       - uses: actions/checkout@v7
       - run: reuse lint
 
+  # The two READMEs are generated from one body (ci/readme-sync.sh); drift is
+  # invisible until somebody reads the wrong one.
+  readme-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ci/readme-sync.sh --check
+
   # --- JVM jobs -----------------------------------------------------------------
 
   compile:
-    needs: [license]
+    needs: [license, readme-sync]
     runs-on: ubuntu-latest
     container: sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x
     steps:
@@ -93,30 +104,49 @@ jobs:
             jvm-test.log
           retention-days: 14
 
-  # Codecov rejects tokenless uploads outside pull requests ("Token required -
-  # not valid tokenless upload"), so without the CODECOV_TOKEN repository secret
-  # the badge stays empty. Say so loudly instead of uploading into the void,
-  # and once the token is there, a failed upload fails the job.
-  coverage:
+  # Where the GitHub coverage badge links: scoverage's HTML report on GitHub
+  # Pages, plus badge.json, the shields.io endpoint document the badge reads its
+  # number from. GitLab's counterpart is `coverage-wiki`. First-party on
+  # purpose: no third-party coverage service, token or account to keep alive.
+  coverage-pages:
+    name: coverage:pages
     needs: [test-jvm]
+    # workflow_dispatch as well as push, both on main: a report that can only be
+    # republished by landing a commit cannot be republished when the deploy -
+    # not the code - is what failed. The branch check keeps forks' PRs out.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    permissions:
+      pages: write
+      id-token: write
+    # Its own group: a queued deployment waits for the one in flight rather
+    # than cancelling it.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - if: env.CODECOV_TOKEN == ''
-        run: echo "::warning title=Coverage not uploaded::CODECOV_TOKEN secret is not set; see CONTRIBUTING.md (CI)."
-      - if: env.CODECOV_TOKEN != ''
-        uses: actions/checkout@v7
-      - if: env.CODECOV_TOKEN != ''
-        uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: jvm-test-results
-      - if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v7
+      - name: Assemble the site
+        run: |
+          cp -R coverage/html site
+          python3 ci/coverage-summary.py badge coverage/scoverage.xml > site/badge.json
+          cat site/badge.json
+      - uses: actions/configure-pages@v6
         with:
-          files: coverage/cobertura.xml
-          token: ${{ env.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
 
   # --- integration: docker compose on the runner's Docker daemon ----------------
 

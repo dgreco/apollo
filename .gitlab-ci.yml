@@ -9,9 +9,14 @@
 # same container images. Change a script, not a job, and keep the two YAML
 # files in step when adding or removing a job.
 #
-# Pipeline: license (REUSE) → compile (JVM) → test (JVM + coverage) →
-# integration (Docker-in-Docker + docker compose) → native (link + test) →
-# on a v* tag: package (assembly jar) → release (jar + native binary).
+# Pipeline: license (REUSE) + README sync → compile (JVM) → test (JVM +
+# coverage) → integration (Docker-in-Docker + docker compose) → native (link +
+# test) → on main: coverage report → on a v* tag: package (assembly jar) →
+# release (jar + native binary).
+#
+# The coverage report is the one deliberate difference between the forges:
+# each publishes where its own badge links (GitLab: a wiki page, since this
+# instance has no Pages; GitHub: the HTML report on GitHub Pages).
 #
 # Notes
 #  * The image is on the sbtscala sbt-2.x line; its launcher runs the sbt 2.0.8
@@ -36,6 +41,7 @@ stages:
   - test
   - integration
   - native
+  - publish
   - package
   - release
 
@@ -47,6 +53,16 @@ variables:
     -Dsbt.global.base=$CI_PROJECT_DIR/.sbt/global
     -Dsbt.ivy.home=$CI_PROJECT_DIR/.ivy2
     -Dsbt.color=true
+  # The runner's DNS intermittently fails to resolve the GitLab host, and the
+  # clone dies with "Could not resolve host ... (Timeout while contacting DNS
+  # servers)" before any script runs (pipelines 392, 393, 394). GitLab reports
+  # that as script_failure - the same class as a failing test - so `retry:when`
+  # cannot tell the two apart. These make the *runner* retry the fetch itself,
+  # which is exactly the step that fails and nothing else. A mitigation; the fix
+  # is on the runner host.
+  GET_SOURCES_ATTEMPTS: "3"
+  RESTORE_CACHE_ATTEMPTS: "3"
+  ARTIFACT_DOWNLOAD_ATTEMPTS: "3"
 
 # Run once per branch/MR/tag, and don't double-run a branch that has an open MR.
 workflow:
@@ -69,6 +85,14 @@ license:reuse:
     entrypoint: [""]
   script:
     - reuse lint
+
+# The two READMEs are generated from one body (ci/readme-sync.sh); drift is
+# invisible until somebody reads the wrong one.
+readme-sync:
+  stage: lint
+  image: debian:bookworm-slim
+  script:
+    - ci/readme-sync.sh --check
 
 # --- JVM jobs -----------------------------------------------------------------
 
@@ -169,6 +193,42 @@ native:link-and-test:
     paths:
       - dist/
     expire_in: 1 week
+
+# --- coverage report (default branch) ----------------------------------------
+#
+# Where the GitLab coverage badge links. GitHub's counterpart is `coverage-pages`.
+
+coverage-wiki:
+  stage: publish
+  image: alpine:3.21
+  needs: ["test:jvm"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - apk add --no-cache git python3
+    - ci/coverage-wiki.sh
+  # A report that cannot be published is not a reason to fail a build; the job
+  # still goes red on its own row, with git's own words in the log.
+  allow_failure: true
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths: [Coverage.md]
+
+# Only where Pages exists: GitLab predefines CI_PAGES_URL when the instance has
+# it, so this skips cleanly here and starts publishing by itself the day Pages
+# is enabled (then point GITLAB_REPORT in ci/readme-sync.sh at it).
+pages:
+  stage: publish
+  image: debian:bookworm-slim
+  needs: ["test:jvm"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PAGES_URL'
+  script:
+    - rm -rf public && cp -a coverage/html public
+  artifacts:
+    paths: [public]
+    expire_in: 4 weeks
 
 # --- release (v* tags only) ---------------------------------------------------
 

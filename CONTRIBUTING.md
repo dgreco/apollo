@@ -77,11 +77,16 @@ conditions.
 is a script in [`ci/`](ci/), so a script behaves identically on both forges.
 When you add or remove a job, update **both** files.
 
-Coverage badges: GitLab computes its own from the `test:jvm` job. On GitHub
-the `coverage` job uploads `coverage/cobertura.xml` to
-[Codecov](https://app.codecov.io/gh/dgreco/apollo), which needs the repository
-secret `CODECOV_TOKEN` (the upload token from the repo's Codecov settings page);
-without it the job only emits a warning.
+Badges differ per forge: GitHub renders `.github/README.md`, GitLab the root
+`README.md`. Both are generated from the root one by `ci/readme-sync.sh` — edit
+`README.md`, run the script, commit both; CI fails if they drift.
+
+Each forge's coverage badge opens the report its own pipeline published on
+`main`: GitHub's `coverage-pages` job deploys the scoverage HTML report (and the
+`badge.json` the badge reads) to <https://dgreco.github.io/apollo/>; GitLab's
+`coverage-wiki` job writes it to the project wiki's *Coverage* page. The latter
+needs a `WIKI_TOKEN` CI/CD variable — a project access token with role
+Developer and scope `write_repository` — and only logs a notice without one.
 
 ## Releasing (maintainers)
 

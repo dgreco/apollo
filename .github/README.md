@@ -1,3 +1,4 @@
+<!-- Generated from ../README.md by ci/readme-sync.sh. Edit that one. -->
 <!--
 SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
 
@@ -15,9 +16,9 @@ SPDX-License-Identifier: Apache-2.0
   pipelines fails if either is stale.
 -->
 <!-- BADGES:START -->
-[![pipeline](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/pipeline.svg)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main)
-[![coverage](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/coverage.svg)](https://gitlab.davidgreco.it/dgreco/apollo/-/wikis/Coverage)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![build](https://img.shields.io/github/actions/workflow/status/dgreco/apollo/ci.yml?branch=main&label=build&logo=github)](https://github.com/dgreco/apollo/actions/workflows/ci.yml?query=branch%3Amain)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fdgreco.github.io%2Fapollo%2Fbadge.json)](https://dgreco.github.io/apollo/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](../LICENSE)
 [![REUSE compliant](https://img.shields.io/badge/REUSE-compliant-brightgreen)](https://reuse.software)
 [![Scala 3.9](https://img.shields.io/badge/scala-3.9-DC322F?logo=scala&logoColor=white)](https://www.scala-lang.org)
 [![Platforms: JVM | Native](https://img.shields.io/badge/platforms-JVM%20%7C%20Native-informational)](#building)
@@ -36,7 +37,7 @@ providers over four wire protocols, and it reads its configuration the *same way
 Python Hermes does, from its own home directory (`~/.apollo`), so a Hermes
 `config.yaml` / `.env` copied in works unchanged.
 
-> New to the internals? [`ARCH.md`](./ARCH.md) documents the architecture (C4
+> New to the internals? [`ARCH.md`](../ARCH.md) documents the architecture (C4
 > model) and walks through, step by step, exactly what happens when a prompt is
 > received.
 
@@ -121,7 +122,7 @@ Native notes:
 The two builds are byte-for-byte behaviorally identical except where a platform
 genuinely differs (line editor, session-search backend, Ctrl-C handling, and the
 email gateway — which needs JDK TLS sockets, so it is JVM-only) — those gaps are
-called out in [`ARCH.md`](./ARCH.md).
+called out in [`ARCH.md`](../ARCH.md).
 
 ---
 
@@ -370,7 +371,7 @@ apollo mcp remove time
 ```
 
 Stdio servers spawn a subprocess; HTTP servers use streamable HTTP; both expose
-their tools to the model as `mcp__<server>__<tool>`. See [`ARCH.md`](./ARCH.md)
+their tools to the model as `mcp__<server>__<tool>`. See [`ARCH.md`](../ARCH.md)
 for the reliability ladder and OAuth flow.
 
 ### Gateway
@@ -439,7 +440,7 @@ Open **Grafana at <http://localhost:3000>** (no login) for the pre-built
 _apollo · agent_ dashboard; Jaeger (<http://localhost:16686>) has the traces and
 Prometheus (<http://localhost:9090>) the raw metrics. `apollo monitoring status`
 shows what's active. Full walkthrough — including a no-Docker path — in
-[`observability/README.md`](observability/README.md). Stop with
+[`observability/README.md`](../observability/README.md). Stop with
 `docker compose down`.
 
 ---
@@ -464,9 +465,9 @@ Coverage (scoverage), exactly as CI runs it:
 ci/test-jvm.sh                         # → coverage/html/index.html, coverage/cobertura.xml
 ```
 
-CI is identical on both forges: [`.gitlab-ci.yml`](.gitlab-ci.yml) and
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) run the same
-[`ci/`](ci/) scripts — REUSE license check, JVM tests with coverage,
+CI is identical on both forges: [`.gitlab-ci.yml`](../.gitlab-ci.yml) and
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) run the same
+[`ci/`](../ci/) scripts — REUSE license check, JVM tests with coverage,
 docker compose integration, and the Native link + test suite. Pushing a `vX.Y.Z`
 tag also publishes a release with the assembly jar and the Linux native binary.
 
@@ -487,7 +488,7 @@ shared/src/test/ jvm/src/test/    # munit suites
 observability/                    # docker-compose OTel demo stack (collector, Jaeger, Prometheus, Grafana)
 ```
 
-See [`ARCH.md`](./ARCH.md) for how these fit together and how a turn flows
+See [`ARCH.md`](../ARCH.md) for how these fit together and how a turn flows
 through them.
 
 ---
@@ -522,15 +523,15 @@ Research product.
 
 Contributions are welcome on [GitLab](https://gitlab.davidgreco.it/dgreco/apollo)
 or [GitHub](https://github.com/dgreco/apollo) — see
-[`CONTRIBUTING.md`](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
-Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
-Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) and the [Code of Conduct](../CODE_OF_CONDUCT.md).
+Report vulnerabilities privately as described in [`SECURITY.md`](../SECURITY.md).
+Notable changes are tracked in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## License
 
-Copyright 2026 David Greco. Licensed under the [Apache License, Version 2.0](LICENSE);
-see [`NOTICE`](NOTICE) for attributions.
+Copyright 2026 David Greco. Licensed under the [Apache License, Version 2.0](../LICENSE);
+see [`NOTICE`](../NOTICE) for attributions.
 
 Every file declares its copyright and license in [SPDX](https://spdx.dev) form,
 following the [REUSE](https://reuse.software) specification; the full license
-texts are in [`LICENSES/`](LICENSES/).
+texts are in [`LICENSES/`](../LICENSES/).

@@ -22,5 +22,8 @@ A release's section doubles as its release notes on GitLab and GitHub
 - Identical CI/CD on GitLab and GitHub: license check, JVM tests with scoverage
   coverage, docker compose integration, Native link + tests, and tag-driven
   releases with the assembly jar and the Linux native binary.
+- Per-forge README badges (`ci/readme-sync.sh`): each forge shows its own
+  build status and a coverage badge linking to the report its own pipeline
+  publishes — GitHub Pages on GitHub, the project wiki on GitLab.
 - Contributing guide, code of conduct, security policy, and issue / merge
   request templates for both forges.

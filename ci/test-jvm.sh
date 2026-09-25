@@ -11,9 +11,9 @@
 #
 # Outputs (stable paths, independent of the Scala version in target/):
 #   jvm-test.log            full sbt output
-#   coverage/cobertura.xml  Cobertura report (GitLab MR coverage, Codecov)
-#   coverage/scoverage.xml  scoverage XML report
-#   coverage/html/          browsable HTML report
+#   coverage/cobertura.xml  Cobertura report (GitLab MR coverage)
+#   coverage/scoverage.xml  scoverage XML report (coverage wiki page, badge.json)
+#   coverage/html/          browsable HTML report (GitHub Pages)
 #   test-reports/           JUnit XML, one file per suite
 #
 # It also prints a single "Coverage: NN.NN%" line; GitLab's `coverage:` regex
