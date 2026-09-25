@@ -1,7 +1,17 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # GitLab CI for apollo — assumes a Docker executor.
 #
-# Pipeline: compile (JVM) → test (JVM) → integration (Docker-in-Docker +
-# docker compose) → native (auto; needs the LLVM + OpenSSL + liburing toolchain).
+# This pipeline and .github/workflows/ci.yml are the SAME pipeline on two
+# forges: every job's work lives in a ci/*.sh script that both call, inside the
+# same container images. Change a script, not a job, and keep the two YAML
+# files in step when adding or removing a job.
+#
+# Pipeline: license (REUSE) → compile (JVM) → test (JVM + coverage) →
+# integration (Docker-in-Docker + docker compose) → native (link + test) →
+# on a v* tag: package (assembly jar) → release (jar + native binary).
 #
 # Notes
 #  * The image is on the sbtscala sbt-2.x line; its launcher runs the sbt 2.0.8
@@ -11,24 +21,23 @@
 #  * JDK 25+ is REQUIRED, not just recommended: kyo 1.0.0-RC6's macro artifacts
 #    are compiled for Java 25 (class file version 69) and macros run at COMPILE
 #    time, so JDK 21 dies with UnsupportedClassVersionError. Hence temurin-25.
-#  * `agentJVM/test` maps to testQuick (skips unchanged suites), so the test jobs
-#    use `testOnly *` to force a full run.
-#  * Every test job asserts a NON-ZERO test count. sbt 2's ActionCache can serve
-#    an empty `Test/compile` output, which links a test binary containing no test
-#    classes: the run then prints `Passed: Total 0, Failed 0` and `[success]` and
-#    looks green while having executed nothing. That was the real state of the
-#    Native suite locally in Sept 2026, so the guard is not theoretical.
-#  * The native job is memory-hungry (.jvmopts sets -Xmx8G); it runs on every
-#    pipeline as a hard gate, so a Native-only regression fails CI. It needs
-#    liburing-dev on the runner (kyo-net's io_uring backend links -luring). It
-#    links the binary AND runs the Native suite in one sbt invocation so both
-#    share a single compile.
+#  * Every test job asserts a NON-ZERO test count (ci/assert-tests-ran.sh). sbt
+#    2's ActionCache can serve an empty `Test/compile` output, which links a
+#    test binary containing no test classes: the run then prints `Passed: Total
+#    0, Failed 0` and `[success]` and looks green while having executed
+#    nothing. That was the real state of the Native suite locally in Sept 2026,
+#    so the guard is not theoretical.
+#  * The native job is a hard gate on every pipeline, so a Native-only
+#    regression fails CI.
 
 stages:
+  - lint
   - build
   - test
   - integration
   - native
+  - package
+  - release
 
 variables:
   # Keep sbt/coursier caches inside the project dir so GitLab can cache them.
@@ -45,6 +54,21 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null'
     - if: '$CI_COMMIT_TAG'
+
+.release-tag:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+.*$/'
+
+# --- licensing ----------------------------------------------------------------
+
+# Every file must carry an SPDX header or be covered by REUSE.toml.
+license:reuse:
+  stage: lint
+  image:
+    name: fsfe/reuse:latest
+    entrypoint: [""]
+  script:
+    - reuse lint
 
 # --- JVM jobs -----------------------------------------------------------------
 
@@ -73,11 +97,20 @@ test:jvm:
   stage: test
   needs: ["compile"]
   script:
-    # Bare `test` == testQuick; `testOnly *` forces the whole suite to run.
-    - sbt "agentJVM/testOnly *" 2>&1 | tee jvm-test.log
-    # tee masks sbt's exit code, so the guard asserts on the log instead - sbt
-    # must have succeeded AND run a non-zero number of tests (see header note).
-    - ci/assert-tests-ran.sh jvm-test.log
+    - ci/test-jvm.sh
+  # Drives the project's coverage badge (badges/<branch>/coverage.svg).
+  coverage: '/^Coverage: (\d+\.\d+)%/'
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - coverage/
+      - jvm-test.log
+    reports:
+      junit: test-reports/*.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
 
 # --- integration: docker compose under Docker-in-Docker -----------------------
 
@@ -91,36 +124,21 @@ integration:compose:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_CERT_PATH: "/certs/client"
     DOCKER_TLS_VERIFY: "1"
-  before_script:
-    - docker info
-    - docker compose version   # fails fast if the compose plugin is missing
   script:
-    - docker compose up -d
-    - docker compose ps
-    # Prove the stack is reachable — the shape a docker-backed integration
-    # test (e.g. apollo's `terminal.backend: docker`) would build on.
-    - docker compose exec -T sandbox sh -c 'echo "hello from docker compose under dind"'
-  after_script:
-    - docker compose down -v || true
+    - ci/integration.sh
 
 # --- native binary (heavy toolchain) ------------------------------------------
 
 native:link-and-test:
   extends: .sbt
   stage: native
-  # A hard parity gate: the Native binary is built and linked on every pipeline,
-  # so a Native-only break (io_uring/OpenSSL linkage, a non-portable API) fails
-  # CI instead of surfacing later. It also runs the Native test suite — linking
-  # alone proves the code compiles and links, not that it behaves, and Native is
-  # a first-class target. Both commands run in one sbt invocation so the Native
-  # compile is paid once. Memory-hungry (.jvmopts sets -Xmx8G).
-  before_script:
-    # Throttle the build for CI only; the working copy is a throwaway clone and
-    # local dev keeps .jvmopts as it is. The Native link kept killing the host
-    # in codegen - the phase after "Optimizing (debug mode)" where Scala Native
-    # compiles the LLVM IR files - taking sbt down with it ("sbt server
-    # disconnected", jobs 1091/1095) or freezing the runner until GitLab failed
-    # the job with no_updates_running (job 1077).
+  variables:
+    # Throttle the build for this runner only; local dev keeps .jvmopts as it
+    # is. The Native link kept killing the host in codegen - the phase after
+    # "Optimizing (debug mode)" where Scala Native compiles the LLVM IR files -
+    # taking sbt down with it ("sbt server disconnected", jobs 1091/1095) or
+    # freezing the runner until GitLab failed the job with no_updates_running
+    # (job 1077).
     #
     # The Native workload is NOT what regressed: against the last green run
     # (job 498) this link discovers 25091 vs 25092 classes and 51779 vs 51783
@@ -137,37 +155,43 @@ native:link-and-test:
     #                           (OutOfMemoryError: Java heap space, job 1110).
     #                 3G sits between them. Disk is NOT a factor: 32G free and
     #                 flat across the build.
-    #  * ActiveProcessorCount=1 - one clang at a time, so the codegen fan-out
-    #                 leaves as much of the ~4.9Gi as possible to the heap.
-    #  * ActiveProcessorCount - the actual fix. Build$ sizes its compile pool
+    #  * ActiveProcessorCount=1 - the actual fix. Build$ sizes its compile pool
     #                 with Executors.newFixedThreadPool(availableProcessors),
     #                 one clang per IR file, so on a many-core host ~151 files
     #                 fan out far past what the RAM can back. NativeConfig
     #                 exposes no parallelism knob in 0.5.12, but capping the
     #                 JVM's view of the CPU count caps the pool. Slower codegen
     #                 (27s at full width in job 498), which CI can afford.
-    - printf '%s\n' "-Xmx3G" "-XX:ActiveProcessorCount=1" > .jvmopts
-    # Scala Native links a C/LLVM toolchain plus three native libraries:
-    #  * libssl-dev     — kyo-http's OpenSSL 3 TLS shim.
-    #  * liburing-dev   — kyo-net statically links -luring (-Wl,-Bstatic -luring)
-    #    for its Linux io_uring backend, and its C shim #includes <liburing.h>.
-    #    Without the dev package the shim compiles to an empty translation unit
-    #    and every kyo_uring_*/io_uring_* symbol is undefined at link time.
-    #  * libstdc++-11-dev — boringssl's whole-archive pulls in -lstdc++.
-    - apt-get update -qq
-    - apt-get install -y -qq clang llvm libstdc++-11-dev zlib1g-dev libssl-dev liburing-dev
+    NATIVE_JVMOPTS: "-Xmx3G -XX:ActiveProcessorCount=1"
   script:
-    # One quoted string with `;` — sbt 2.0.8 CONCATENATES separate argument
-    # strings into a single command line instead of running them in sequence,
-    # so `sbt cmd1 "cmd2"` would silently never run cmd2.
-    # On failure, print the memory state: the heap below is sized to a narrow
-    # window on this runner, so "how much was actually free" is the first thing
-    # anyone debugging a future failure here will want.
-    - sbt "agentNative/nativeLink; agentNative/testOnly *" 2>&1 | tee native-test.log || { echo "=== memory at failure ==="; free -h; exit 1; }
-    # tee masks sbt's exit code, so the guard asserts on the log instead. A
-    # vacuous Native run reports "Total 0" and still exits green - see header.
-    - ci/assert-tests-ran.sh native-test.log
+    - ci/native.sh
   artifacts:
     paths:
-      - target/out/native0.5/scala-3.9.0/apollo/apollo
+      - dist/
     expire_in: 1 week
+
+# --- release (v* tags only) ---------------------------------------------------
+
+package:jvm:
+  extends: [.sbt, .release-tag]
+  stage: package
+  script:
+    - ci/package-jvm.sh
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+release:
+  extends: .release-tag
+  stage: release
+  image:
+    name: registry.gitlab.com/gitlab-org/cli:latest
+    entrypoint: [""]
+  needs: ["package:jvm", "native:link-and-test"]
+  script:
+    - glab auth login --job-token "$CI_JOB_TOKEN" --hostname "$CI_SERVER_HOST" --api-protocol "$CI_SERVER_PROTOCOL"
+    - ci/release-notes.sh "$CI_COMMIT_TAG" > release-notes.md
+    # Assets go to the project's generic package registry (job tokens may write
+    # there) and are linked from the release.
+    - glab release create "$CI_COMMIT_TAG" dist/* --name "apollo $CI_COMMIT_TAG" --notes-file release-notes.md --use-package-registry

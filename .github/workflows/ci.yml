@@ -1,0 +1,188 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# GitHub Actions for apollo — the same pipeline as .gitlab-ci.yml.
+#
+# Every job's work lives in a ci/*.sh script that both forges call, inside the
+# same container images, and `needs:` reproduces GitLab's stage ordering. Change
+# a script, not a job, and keep the two YAML files in step when adding or
+# removing a job. See .gitlab-ci.yml for the notes on the JDK and the
+# non-zero-test-count guard.
+#
+# Pipeline: license (REUSE) → compile (JVM) → test (JVM + coverage) →
+# integration (docker compose) → native (link + test) →
+# on a v* tag: package (assembly jar) → release (jar + native binary).
+#
+# The one GitHub-only job is `coverage`, which uploads the Cobertura report to
+# Codecov for the README badge (GitLab renders its own badge from the test job).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# The sbt jobs pin the same image as .gitlab-ci.yml's `.sbt` template
+# (`jobs.<id>.container` cannot read the `env` context, so it is repeated).
+
+jobs:
+  # --- licensing ----------------------------------------------------------------
+
+  # Every file must carry an SPDX header or be covered by REUSE.toml.
+  license:
+    name: license:reuse
+    runs-on: ubuntu-latest
+    container: fsfe/reuse:latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: reuse lint
+
+  # --- JVM jobs -----------------------------------------------------------------
+
+  compile:
+    needs: [license]
+    runs-on: ubuntu-latest
+    container: sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x
+    steps:
+      - uses: actions/checkout@v7
+      - &sbt-env
+        name: Keep sbt/coursier caches inside the workspace
+        run: |
+          {
+            echo "COURSIER_CACHE=$PWD/.cache/coursier"
+            echo "SBT_OPTS=-Dsbt.boot.directory=$PWD/.sbt/boot -Dsbt.global.base=$PWD/.sbt/global -Dsbt.ivy.home=$PWD/.ivy2 -Dsbt.color=true"
+          } >> "$GITHUB_ENV"
+      - &sbt-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            .cache/coursier
+            .ivy2
+            .sbt
+          key: sbt-${{ hashFiles('build.sbt', 'project/plugins.sbt', 'project/build.properties') }}
+          restore-keys: sbt-
+      - run: sbt agentJVM/compile
+
+  test-jvm:
+    name: test:jvm
+    needs: [compile]
+    runs-on: ubuntu-latest
+    container: sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x
+    steps:
+      - uses: actions/checkout@v7
+      - *sbt-env
+      - *sbt-cache
+      - run: ci/test-jvm.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jvm-test-results
+          path: |
+            coverage/
+            test-reports/
+            jvm-test.log
+          retention-days: 14
+
+  # Codecov rejects tokenless uploads outside pull requests ("Token required -
+  # not valid tokenless upload"), so without the CODECOV_TOKEN repository secret
+  # the badge stays empty. Say so loudly instead of uploading into the void,
+  # and once the token is there, a failed upload fails the job.
+  coverage:
+    needs: [test-jvm]
+    runs-on: ubuntu-latest
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - if: env.CODECOV_TOKEN == ''
+        run: echo "::warning title=Coverage not uploaded::CODECOV_TOKEN secret is not set; see CONTRIBUTING.md (CI)."
+      - if: env.CODECOV_TOKEN != ''
+        uses: actions/checkout@v7
+      - if: env.CODECOV_TOKEN != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: jvm-test-results
+      - if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage/cobertura.xml
+          token: ${{ env.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  # --- integration: docker compose on the runner's Docker daemon ----------------
+
+  integration:
+    name: integration:compose
+    needs: [license, compile, test-jvm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ci/integration.sh
+
+  # --- native binary (heavy toolchain) ------------------------------------------
+
+  native:
+    name: native:link-and-test
+    needs: [integration]
+    runs-on: ubuntu-latest
+    container: sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x
+    # NATIVE_JVMOPTS is left unset: GitHub's hosted runners (16 GB, 4 vCPUs)
+    # fit the repository's .jvmopts (-Xmx8G) as-is. The GitLab runner is the
+    # memory-starved one - see the sizing notes in .gitlab-ci.yml.
+    steps:
+      - uses: actions/checkout@v7
+      - *sbt-env
+      - *sbt-cache
+      - run: ci/native.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-binary
+          path: dist/
+          retention-days: 7
+
+  # --- release (v* tags only) ---------------------------------------------------
+
+  package-jvm:
+    name: package:jvm
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [native]
+    runs-on: ubuntu-latest
+    container: sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x
+    steps:
+      - uses: actions/checkout@v7
+      - *sbt-env
+      - *sbt-cache
+      - run: ci/package-jvm.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jvm-jar
+          path: dist/
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package-jvm, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ci/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "apollo $GITHUB_REF_NAME" --notes-file release-notes.md

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package apollo.config
 
 /** Static build metadata. Lives at the bottom of the stack because the banner,

@@ -1,4 +1,19 @@
+<!--
+SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # apollo ☀
+
+[![GitLab pipeline](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/pipeline.svg?key_text=GitLab%20CI&key_width=70)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main)
+[![GitLab coverage](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/coverage.svg?key_text=GitLab%20coverage&key_width=100)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main)
+[![GitHub CI](https://github.com/dgreco/apollo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dgreco/apollo/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/dgreco/apollo/graph/badge.svg)](https://codecov.io/gh/dgreco/apollo)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![REUSE compliant](https://img.shields.io/badge/REUSE-compliant-green.svg)](https://reuse.software)
+[![Scala 3.9](https://img.shields.io/badge/scala-3.9-DC322F.svg?logo=scala)](https://www.scala-lang.org)
+[![Platforms: JVM | Native](https://img.shields.io/badge/platforms-JVM%20%7C%20Native-informational.svg)](#building)
 
 **apollo** is a from-scratch clone of the [Hermes agent harness](https://github.com/NousResearch/hermes-agent)
 (Nous Research), written in **Scala 3** on the **[Kyo](https://getkyo.io)** effect
@@ -435,6 +450,18 @@ sbt "agentNative/testOnly *"           # the suite on the native binary
 > serially (`Test / parallelExecution := false`) because the MCP manager and
 > tool registry are process-global.
 
+Coverage (scoverage), exactly as CI runs it:
+
+```bash
+ci/test-jvm.sh                         # → coverage/html/index.html, coverage/cobertura.xml
+```
+
+CI is identical on both forges: [`.gitlab-ci.yml`](.gitlab-ci.yml) and
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) run the same
+[`ci/`](ci/) scripts — REUSE license check, JVM tests with coverage,
+docker compose integration, and the Native link + test suite. Pushing a `vX.Y.Z`
+tag also publishes a release with the assembly jar and the Linux native binary.
+
 ---
 
 ## Project layout
@@ -480,3 +507,22 @@ export (see [Observability](#observability)).
 
 Status: **0.1.0-SNAPSHOT** — an actively developed clone, not an official Nous
 Research product.
+
+---
+
+## Contributing
+
+Contributions are welcome on [GitLab](https://gitlab.davidgreco.it/dgreco/apollo)
+or [GitHub](https://github.com/dgreco/apollo) — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
+Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
+
+## License
+
+Copyright 2026 David Greco. Licensed under the [Apache License, Version 2.0](LICENSE);
+see [`NOTICE`](NOTICE) for attributions.
+
+Every file declares its copyright and license in [SPDX](https://spdx.dev) form,
+following the [REUSE](https://reuse.software) specification; the full license
+texts are in [`LICENSES/`](LICENSES/).

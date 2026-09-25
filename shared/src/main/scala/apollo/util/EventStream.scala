@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package apollo.util
 
 /** Decoder for AWS's `application/vnd.amazon.eventstream` binary framing (used by

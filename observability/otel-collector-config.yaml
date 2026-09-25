@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # OpenTelemetry Collector pipeline for apollo.
 # Receives OTLP from apollo, fans traces out to Jaeger, exposes metrics for
 # Prometheus to scrape, and prints logs to stdout.

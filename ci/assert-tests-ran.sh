@@ -1,4 +1,9 @@
 #!/bin/sh
+
+# SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Guard against a vacuous test run.
 #
 # sbt 2's ActionCache can serve an EMPTY `Test/compile` output. The test binary

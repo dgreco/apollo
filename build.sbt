@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: 2026 David Greco <greco@acm.org>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import scala.scalanative.build.*
 import scala.sys.process.*
 
 // ---------------------------------------------------------------------------
-// jupyter-agent — a Scala 3 + Kyo agent harness
+// apollo — a Scala 3 + Kyo agent harness
 // Cross-built for JVM and Native.
 // ---------------------------------------------------------------------------
 
@@ -18,6 +22,19 @@ inThisBuild(
     scalaVersion  := "3.9.0",
     organization  := "dev.apollo",
     version       := "0.1.0-SNAPSHOT",
+    homepage      := Some(url("https://github.com/dgreco/apollo")),
+    licenses      := List("Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
+    startYear     := Some(2026),
+    developers    := List(
+      Developer("dgreco", "David Greco", "greco@acm.org", url("https://github.com/dgreco"))
+    ),
+    scmInfo       := Some(
+      ScmInfo(
+        url("https://github.com/dgreco/apollo"),
+        "scm:git:https://github.com/dgreco/apollo.git",
+        "scm:git:git@gitlab.davidgreco.it:dgreco/apollo.git"
+      )
+    ),
     scalacOptions ++= List("-deprecation", "-feature", "-unchecked", "-Wunused:imports")
   )
 )
