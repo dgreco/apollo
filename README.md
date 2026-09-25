@@ -6,14 +6,15 @@ SPDX-License-Identifier: Apache-2.0
 
 # apollo ☀
 
-[![GitLab pipeline](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/pipeline.svg?key_text=GitLab%20CI&key_width=70)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main)
-[![GitLab coverage](https://gitlab.davidgreco.it/dgreco/apollo/badges/main/coverage.svg?key_text=GitLab%20coverage&key_width=100)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main)
-[![GitHub CI](https://github.com/dgreco/apollo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dgreco/apollo/actions/workflows/ci.yml)
-[![Codecov](https://codecov.io/gh/dgreco/apollo/graph/badge.svg)](https://codecov.io/gh/dgreco/apollo)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![REUSE compliant](https://img.shields.io/badge/REUSE-compliant-green.svg)](https://reuse.software)
-[![Scala 3.9](https://img.shields.io/badge/scala-3.9-DC322F.svg?logo=scala)](https://www.scala-lang.org)
-[![Platforms: JVM | Native](https://img.shields.io/badge/platforms-JVM%20%7C%20Native-informational.svg)](#building)
+| | GitLab | GitHub |
+|---|---|---|
+| **Build** | [![GitLab build](https://img.shields.io/gitlab/pipeline-status/dgreco%2Fapollo?gitlab_url=https%3A%2F%2Fgitlab.davidgreco.it&branch=main&label=build&logo=gitlab)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main) | [![GitHub build](https://img.shields.io/github/actions/workflow/status/dgreco/apollo/ci.yml?branch=main&label=build&logo=github)](https://github.com/dgreco/apollo/actions/workflows/ci.yml?query=branch%3Amain) |
+| **Coverage** | [![GitLab coverage](https://img.shields.io/gitlab/pipeline-coverage/dgreco%2Fapollo?gitlab_url=https%3A%2F%2Fgitlab.davidgreco.it&branch=main&label=coverage&logo=gitlab)](https://gitlab.davidgreco.it/dgreco/apollo/-/pipelines?ref=main) | [![Codecov](https://img.shields.io/codecov/c/github/dgreco/apollo/main?label=coverage&logo=codecov)](https://app.codecov.io/gh/dgreco/apollo) |
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![REUSE compliant](https://img.shields.io/badge/REUSE-compliant-brightgreen)](https://reuse.software)
+[![Scala 3.9](https://img.shields.io/badge/scala-3.9-DC322F?logo=scala&logoColor=white)](https://www.scala-lang.org)
+[![Platforms: JVM | Native](https://img.shields.io/badge/platforms-JVM%20%7C%20Native-informational)](#building)
 
 **apollo** is a from-scratch clone of the [Hermes agent harness](https://github.com/NousResearch/hermes-agent)
 (Nous Research), written in **Scala 3** on the **[Kyo](https://getkyo.io)** effect
