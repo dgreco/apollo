@@ -19,19 +19,27 @@
 # It also prints a single "Coverage: NN.NN%" line; GitLab's `coverage:` regex
 # reads it to drive the coverage badge.
 #
-# Local use: `ci/test-jvm.sh`. If every suite fails with a FileNotFoundException
-# under scoverage-data/, sbt 2's ActionCache restored instrumented classes
-# without the coverage metadata the compiler writes beside them - run
-# `sbt shutdown`, remove ~/Library/Caches/sbt/v2/ac, and re-run.
+# Local use: `ci/test-jvm.sh`.
 set -eu
 
 log=jvm-test.log
+
+# A fresh scoverage data directory for every run. The instrumenting compiler
+# writes its statement metadata (scoverage.coverage) there as a side effect,
+# and the instrumented classes append measurements to it at test time. sbt 2's
+# ActionCache replays the compiled classes but not that side effect, so a
+# cache hit (a second pipeline on the same commit, via GitLab's cached .sbt/)
+# left classes pointing at a directory that no longer existed and every suite
+# died with FileNotFoundException .../scoverage-data/... (pipeline 389). The
+# directory is baked into the compiler options, so a unique path is a cache
+# miss by construction: coverage always recompiles, and always has its data.
+data_dir="$PWD/target/scoverage-data-$(date +%s)-$$"
 
 # Bare `test` == testQuick; `testOnly *` forces the whole suite to run. `tee`
 # would mask sbt's exit code (no pipefail in POSIX sh), so it is captured in a
 # side file: a failing coverageReport after green tests must still fail the job.
 status_file=$(mktemp)
-{ sbt "coverage; agentJVM/testOnly *; agentJVM/coverageReport" 2>&1; echo $? > "$status_file"; } | tee "$log"
+{ sbt "set agentJVM / coverageDataDir := file(\"$data_dir\"); coverage; agentJVM/testOnly *; agentJVM/coverageReport" 2>&1; echo $? > "$status_file"; } | tee "$log"
 status=$(cat "$status_file")
 rm -f "$status_file"
 
