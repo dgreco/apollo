@@ -93,19 +93,30 @@ jobs:
             jvm-test.log
           retention-days: 14
 
+  # Codecov rejects tokenless uploads outside pull requests ("Token required -
+  # not valid tokenless upload"), so without the CODECOV_TOKEN repository secret
+  # the badge stays empty. Say so loudly instead of uploading into the void,
+  # and once the token is there, a failed upload fails the job.
   coverage:
     needs: [test-jvm]
     runs-on: ubuntu-latest
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - if: env.CODECOV_TOKEN == ''
+        run: echo "::warning title=Coverage not uploaded::CODECOV_TOKEN secret is not set; see CONTRIBUTING.md (CI)."
+      - if: env.CODECOV_TOKEN != ''
+        uses: actions/checkout@v7
+      - if: env.CODECOV_TOKEN != ''
+        uses: actions/download-artifact@v8
         with:
           name: jvm-test-results
-      - uses: codecov/codecov-action@v7
+      - if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v7
         with:
           files: coverage/cobertura.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          token: ${{ env.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
   # --- integration: docker compose on the runner's Docker daemon ----------------
 

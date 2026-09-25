@@ -77,6 +77,12 @@ conditions.
 is a script in [`ci/`](ci/), so a script behaves identically on both forges.
 When you add or remove a job, update **both** files.
 
+Coverage badges: GitLab computes its own from the `test:jvm` job. On GitHub
+the `coverage` job uploads `coverage/cobertura.xml` to
+[Codecov](https://app.codecov.io/gh/dgreco/apollo), which needs the repository
+secret `CODECOV_TOKEN` (the upload token from the repo's Codecov settings page);
+without it the job only emits a warning.
+
 ## Releasing (maintainers)
 
 1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
